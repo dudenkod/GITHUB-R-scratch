@@ -1,0 +1,210 @@
+---
+title: "Classification Challenge by KrediTech"
+author: "Dmytro Dudenko"
+date: "3. Mai 2016"
+output: 
+  html_document: 
+    keep_md: yes
+---
+
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.width=5, fig.height=5,
+                      echo=FALSE, warning=FALSE, message=FALSE)
+
+```
+
+Let's see and touch a bit the training data
+
+```{r cache=TRUE}
+
+
+train = read.csv(file="Training.csv", header = TRUE,  fill=TRUE, sep = ';')
+valid = read.csv(file="Validation.csv", header = TRUE, fill = TRUE, sep = ';')
+summary(train)
+str(train)
+
+
+library("Amelia")
+missmap(train, main="Titanic Training Data - Missings Map", 
+        col=c("yellow", "black"), legend=FALSE)
+```
+Some of the features are factors (and some of them are skewed).
+Other features are numeric and intereger.
+
+Firstly, one shall load all libraries one might need during data play.
+Also, parallel run would be a good idea as training a neural network (avNNet or nnet) is simply too heavy for my laptop.
+
+```{r, echo=FALSE, cache=TRUE}
+library(doParallel); library(parallel)
+cores=detectCores()
+clust = makeCluster(cores)
+registerDoParallel(clust)
+library(caret); library(kernlab); library(ISLR); library(RANN);
+library(DMwR);library(MASS); library(randomForest)
+
+train_caret = train
+valid_caret = valid
+
+```
+These features look like numbers, let's make them so.
+
+```{r, echo=FALSE, cache=TRUE}
+train_caret$v17 = as.numeric(train_caret$v17)
+train_caret$v19 = as.numeric(train_caret$v19)
+train_caret$v29 = as.numeric(train_caret$v29)
+
+valid_caret$v17 = as.numeric(valid_caret$v17)
+valid_caret$v19 = as.numeric(valid_caret$v19)
+valid_caret$v29 = as.numeric(valid_caret$v29)
+
+```
+
+Now one should get rid of NA's. There are two ways: either call complete.cases or do imputation.
+As the dataset is not that big, I would rather prefer to keep not clean records, we may desperately need them for nnet or rf training...Therefore, calling imputation
+
+```{r, echo=FALSE, cache=TRUE}
+
+train_caret= knnImputation(train_caret, k=75)
+valid_caret = knnImputation(valid_caret, k=25)
+
+```
+
+The training data is quite skewed, "no." is marginally present.
+
+```{r, echo=FALSE, cache=TRUE}
+
+table(train_caret$classLabel)
+table(valid_caret$classLabel)
+
+train_caret = downSample(train_caret[,-19], train_caret$classLabel, yname = "classLabel")
+
+```
+
+Here just trying to spot features with near to zero variation...None is detected.
+
+```{r, echo=FALSE, cache=TRUE}
+
+train_nsv = nearZeroVar(train_caret, saveMetrics = TRUE)
+train_nsv
+
+#valid_nsv = nearZeroVar(valid_caret, saveMetrics = TRUE)
+#valid_nsv
+
+```
+
+We need to have a first glance at all-to-all features correlations.
+On the left the plot corresponds to the training set and on the right, to the validation one.
+First outstanding things to notice are that v18 is just a multiple of v39 and therefore is redundant.
+Second interesting thing is that v7 has 100% correlation with the most important thing - classLabel.
+And it can be seen from the validation plot, this feature is poisonous and totally misguiding.
+This v7 feature should be excluded, otherwise the power of the predictor will be similar to flipping a coin (50% chance) as f and t factors are equally populated in the validation set (in feature v7).
+Just a small remark, it becomes evident below that visualising 19 features is a tough job.
+However, in this report I plotted these matrices just for the purpose of first feeling.
+After this, one can plot specific regions for thorough understanding.
+Anyway, excluding feature by feature, the plots will be seen better.
+
+```{r, echo=FALSE, cache=TRUE}
+
+```{r fig.width=4, fig.height=4,echo=FALSE,out.extra='style="float:left"',cache=TRUE}
+featurePlot(x=train_caret, y=train_caret$classLabel, plot="pairs")
+```{r fig.width=4, fig.height=4,echo=FALSE,out.extra='style="float:center"',cache=TRUE}
+featurePlot(x=valid_caret, y=valid_caret$classLabel, plot="pairs")
+```
+
+Now I present my random forest classifier. Currently it has 90% accuracy.
+I played also with other methods, namely, svm, knn, glm, and nnet as well as its avNNet version.
+All of them result in somewhat lower accuracy, which is varying between 80-90%.
+Not bad after all.
+A small remark: creating new features (logarithmic or polynomial) didn't help to achieve better accuracy.
+Sadly.
+
+```{r, echo=FALSE, cache=TRUE}
+control <- trainControl(method="cv", number=10, repeats=5)
+
+model_RF = train(classLabel~., data=train_caret[,-c(12,17)], method="rf", preProcess="range", trControl=control, tuneGrid = expand.grid(.mtry = c(2:6)),  n.tree=188, maxit=2000)
+
+control <- trainControl(method="repeatedcv", number=10, repeats=10)
+
+gbmGrid <-  expand.grid(interaction.depth = c(1, 5, 9),
+                        n.trees = (1:30)*50,
+                        shrinkage = 0.1,
+                        n.minobsinnode = 20)
+
+model_GBM = train(classLabel~., data=train_caret[,-c(12,17)], method="gbm", trControl=control, tuneGrid=gbmGrid)
+
+PREDICTION = predict(model_RF, newdata=valid_caret[,-c(12,17,19)])
+
+PREDICTION = predict(model_GBM, newdata=valid_caret[,-c(12,17,19)])
+
+confusionMatrix(PREDICTION,valid_caret[,19])
+
+#rpart attempts
+library(rpart)
+my_tree_two <- rpart(classLabel ~., data = train_caret[,-c(12,17)], method = "class", control = rpart.control(minsplit = 50, cp = 0))
+
+# Visualize the decision tree using plot() and text()
+plot(my_tree_two)
+text(my_tree_two)
+
+# Load in the packages to build a fancy plot
+library(rattle)
+library(rpart.plot)
+library(RColorBrewer)
+
+fancyRpartPlot(my_tree_two)
+
+qq=as.data.frame(predict(my_tree_two, valid_caret[,-c(12,17,19)]))
+colnames(qq) = c("NO","YES")
+qq
+answer = as.data.frame(qq$NO<qq$YES)
+answer_prop = ifelse(answer==FALSE, "no.", "yes.")
+colnames(answer_prop) = "classe"
+qplot(answer_prop, colour=valid_caret[,19])
+
+confusionMatrix(answer_prop,valid_caret[,19])
+```
+
+So, after getting roughly 90% of accuracy, one could focus on features, understand them individual and collaborative role and importance.
+
+```{r, echo=FALSE, cache=TRUE}
+
+control <- rfeControl(functions=rfFuncs, method="cv", number=10)
+# run the RFE algorithm
+results <- rfe(train_caret[,-c(12,17,19)], train_caret[,19], sizes=c(1:16), rfeControl=control)
+# summarize the results
+print(results)
+# list the chosen features
+predictors(results)
+# plot the results
+
+#plot(results, type=c("g", "o"))
+
+importance <- varImp(model_RF, scale=FALSE)
+# summarize importance
+print(importance)
+# plot importance
+#plot(importance)
+```{r fig.width=4, fig.height=4,echo=FALSE,out.extra='style="float:left"',cache=TRUE}
+plot(results, split=c(1,1,1,2))
+```{r fig.width=4, fig.height=4,echo=FALSE,out.extra='style="float:center"',cache=TRUE}
+plot(importance, split=c(1,2,1,2))
+
+index_FP = ((PREDICTION != valid_caret$classLabel) & (PREDICTION == 'yes.'))
+index_FN = ((PREDICTION != valid_caret$classLabel) & (PREDICTION == 'no.'))
+
+```
+
+Above we found most important features: v2, v31, v34, v19, v12.
+These are most relevant for our predictor. We should keep it in mind.
+Here would be interesting to have a closer look at False Positives and False Negatives of our predictor.
+For instance, it can be seen that for features v2, v34, v21, v12 some regions are very narrowed.
+ With a caution and care this observation can be exploited for creating extra features, which would differentiate better points corresponding to different classLabels.
+
+```{r fig.width=4, fig.height=4,echo=FALSE,out.extra='style="float:left"',cache=TRUE}
+featurePlot(x=valid_caret[index_FP,-c(12,17,19)], y=valid_caret[index_FP,]$classLabel, plot="pairs")
+```{r fig.width=4, fig.height=4,echo=FALSE,out.extra='style="float:center"',cache=TRUE}
+featurePlot(x=valid_caret[index_FN,-c(12,17,19)], y=valid_caret[index_FN,]$classLabel, plot="pairs")
+```
+
+

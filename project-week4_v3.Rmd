@@ -1,0 +1,292 @@
+---
+title: "Prediction Assignment Writeup"
+author: "Dmytro Dudenko"
+date: "6. Mai 2016"
+output: 
+  html_document: 
+    self_contained: no
+---
+
+In this classification challenge we will use Random Forest, which has a great reputation in solving this type of problems.
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.width=5, fig.height=5,
+                      echo=FALSE, warning=FALSE, message=FALSE)
+
+```
+
+As my PC has 8 available cores, we can profit from this by using parallel libraries together with other useful libs.
+
+
+```{r cache=TRUE, echo=TRUE}
+
+library(doParallel); library(parallel)
+cores=detectCores()
+clust = makeCluster(cores)
+registerDoParallel(clust)
+library(caret); library(kernlab); library(ISLR); library(RANN);
+library(DMwR);library(MASS); library(randomForest); library(e1071)
+
+
+train = read.csv(file="pml-training.csv", header = TRUE,  sep = ',')
+test = read.csv(file="pml-testing.csv", header = TRUE,  sep = ',')
+
+#In this report I will not execute these two commands for the sake of size
+#summary(train)
+#str(train)
+
+```
+
+It can be easily seen that the training data is far from being clean and ready for analysis. Lots of missing data and error values.
+Let's try to clean it steadily.
+Firstly, we should label as NAs empty values, NAs itself, and also error messages "#DIV/0!".
+
+
+```{r cache=TRUE, echo=TRUE}
+
+#In this report I will not execute these two commands for the sake of size
+#summary(test)
+#str(test)
+
+```
+
+The test set looks much cleaner.
+We will preserve its content.
+
+Reloading training and testing sets.
+
+```{r cache=TRUE, echo=TRUE}
+
+train_v1 = read.csv(file="pml-training.csv", na.strings =c("NA", "", "#DIV/0!"), header = TRUE,  sep = ',')
+test_v1 = read.csv(file="pml-testing.csv", na.strings=c("NA", "", "#DIV/0!"), header = TRUE, sep = ',')
+
+#Doing proper time formatting. Although, we will not use it in this project
+
+train_v1$cvtd_timestamp = strptime(train_v1$cvtd_timestamp, "%d/%m/%Y %H:%M")
+test_v1$cvtd_timestamp = strptime(test_v1$cvtd_timestamp, "%d/%m/%Y %H:%M")
+train_v1$cvtd_timestamp = as.Date(train_v1$cvtd_timestamp)
+test_v1$cvtd_timestamp = as.Date(test_v1$cvtd_timestamp)
+
+#In this report I will not execute these four commands for the sake of size
+#summary(train_v1)
+#str(train_v1)
+#summary(test_v1)
+#str(test_v1)
+
+
+```
+
+Our version v1 looks better now.
+Our dataset has a lot of features.
+Perhaps, not all of them are useful.
+We shall try to truncate our list of features.
+One of the ideas would be excluding those features, which have a near zero variation.
+Let's identify them and remove
+
+
+```{r, echo=TRUE, cache=TRUE}
+
+
+#Removing near zero variation. V2
+
+nearzero <- nearZeroVar(train_v1, saveMetrics = TRUE)
+#nearzero
+train_v2 <- train_v1[, !nearzero$nzv]
+
+#str(train_v2)
+
+```
+
+Now we should get NAs sorted.
+Some of the columns are full of NAs and are of no use to us.
+I decided to remove those, which have a simple majority of NAs.
+
+```{r, echo=TRUE, cache=TRUE}
+
+#Removing those with majorities of NA's. V3
+
+NA_cleanup_train =  sapply(colnames(train_v2), function(x) if(sum(is.na(train_v2[,x])) > 0.50*nrow(train_v2)) {return(TRUE)}else{return(FALSE)})
+
+train_v3 = train_v2[,!NA_cleanup_train]
+
+#In this report I will not execute these two commands for the sake of size
+#str(train_v3)
+#summary(train_v3)
+
+#Checking if there any NA's left.
+which(is.na(train_v3))
+
+```
+
+For the remaining features we should find such, which are strongly correlated with each other. Obviously, we could play with PCA-method and reduce our features space.
+I will not do that. I will just exclude those, which correlation is exceeding 0.5. We should exclude from our consideration four variables: X, username, timing and classe.
+X is, in fact, very misguiding. If one uses it in a prediction model, it gives an accuracy of 100% for the training set. Most probably, it is due to the fact that all rows were collected sequently for every exercise class.
+Therefore, we should not use X, and also usernames and dates.
+
+
+```{r, echo=TRUE, cache=TRUE}
+
+#Remove correlations. V4
+
+features_corr <- findCorrelation(cor(train_v3[,-c(1,2,5,59)]), cutoff=0.5)
+features_corr
+names(train_v3[, -c(1,2,5,59)])[features_corr]
+
+train_v4 = train_v3[, -c(1,2,5,59)][,-features_corr]
+train_v4$classe = train_v3[, 59]
+str(train_v4)
+
+```
+
+The training set is simply too large.
+At this stage we will try to gently truncate it without loss of significance.
+Sampling of 10% from our training set should be enough.
+This we will justify by assessing our accuracy.
+The training subset of 10% we will split into 75% for training and 25% for testing.
+
+```{r, echo=TRUE, cache=TRUE}
+
+
+table(train_v4$classe)
+#It is noteworthy that the classes are not skewed, which is good
+#so, we don't need to pick selectively every class...just taking random 10%
+
+reduced_training_set = createDataPartition(y=train_v4$classe, p=0.10, list = FALSE)
+
+inTrain = createDataPartition(y=train_v4[reduced_training_set,]$classe, p=0.75, list = FALSE)
+
+Train_v5 = train_v4[reduced_training_set,][inTrain,]
+Test_v5 = train_v4[reduced_training_set,][-inTrain,]
+
+```
+
+It is very helpful to see what features influence the accuracy.
+Let's take a look at them.
+
+```{r, echo=TRUE, cache=TRUE}
+
+#str(Train_v5)
+
+control <- rfeControl(functions=rfFuncs, method="cv", number=10)
+# run the RFE algorithm
+results <- rfe(Train_v5[,-c(24)], Train_v5[,24], sizes=c(1:23), rfeControl=control)
+# summarize the results
+print(results)
+# list the chosen features
+predictors(results)
+# plot the results
+
+plot(results, type=c("g", "o"))
+
+```
+
+We will try here to compare TOP 7, TOP 10, and the full list of features(23)
+
+```{r, echo=TRUE, cache=TRUE}
+
+control <- trainControl(method="cv", number=10, repeats=5)
+#str(Train_v5)
+
+model_RF_FULL = train(classe~., data=Train_v5, method="rf", preProcess="range", trControl=control, tuneGrid = expand.grid(.mtry = c(2:6)),  n.tree=200, maxit=2000)
+
+PREDICTION_FULL = predict(model_RF_FULL, newdata=Test_v5)
+confusionMatrix(PREDICTION_FULL,Test_v5[,"classe"])
+
+```
+
+Let's see the importance of features and try to select TOP 7 and TOP10.
+This will reduce our training set significantly.
+
+```{r, echo=TRUE, cache=TRUE}
+
+importance <- varImp(model_RF_FULL, scale=FALSE)
+# summarize importance
+print(importance )
+plot(importance)
+
+
+```
+
+Let's see how accurate they are.
+We will constract predictors based on TOP 7 and TOP 10 features.
+
+```{r, echo=TRUE, cache=TRUE}
+TOP7_features = c("num_window","pitch_forearm","magnet_belt_z","roll_dumbbell","roll_forearm", "gyros_belt_z", "pitch_dumbbell", "accel_forearm_z", "classe")
+TOP10_features = c("num_window","pitch_forearm","magnet_belt_z","roll_dumbbell","roll_forearm", "gyros_belt_z", "pitch_dumbbell", "accel_forearm_z","roll_arm", "magnet_forearm_y", "magnet_arm_z","classe")
+
+model_RF_TOP7 = train(classe~., data=Train_v5[,TOP7_features], method="rf", preProcess="range", trControl=control, tuneGrid = expand.grid(.mtry = c(2:6)),  n.tree=200, maxit=2000)
+model_RF_TOP10 = train(classe~., data=Train_v5[,TOP10_features], method="rf", preProcess="range", trControl=control, tuneGrid = expand.grid(.mtry = c(2:6)),  n.tree=200, maxit=2000)
+
+#model_nnet_TOP7 = train(classe~., data=Train_v5[,TOP7_features], method="avNNet", preProcess="range", trControl=control, tuneLength=4, maxit=2000 )
+
+#PREDICTION_nnet_TOP7 = predict(model_nnet_TOP7, newdata=Test_v5)
+#confusionMatrix(PREDICTION_nnet_TOP7,Test_v5[,"classe"])
+
+PREDICTION_TOP7 = predict(model_RF_TOP7, newdata=Test_v5)
+confusionMatrix(PREDICTION_TOP7,Test_v5[,"classe"])
+
+PREDICTION_TOP10 = predict(model_RF_TOP10, newdata=Test_v5)
+confusionMatrix(PREDICTION_TOP10,Test_v5[,"classe"])
+
+PREDICTION_FULL = predict(model_RF_FULL, newdata=Test_v5)
+confusionMatrix(PREDICTION_FULL,Test_v5[,"classe"])
+
+
+```
+
+Accuracies for TOP7, TOP10 and TOP FULL are between 94 and 91%.
+It looks not bad, let's see whether we can improve it.
+Before doing that, let's see whether all three models do similar prediction for our test set.
+
+```{r, echo=TRUE, cache=TRUE}
+
+PREDICTION_COURSE_TOP7 = predict(model_RF_TOP7, newdata=test_v1)
+
+PREDICTION_COURSE_TOP10 = predict(model_RF_TOP10, newdata=test_v1)
+
+PREDICTION_COURSE_FULL = predict(model_RF_FULL, newdata=test_v1)
+
+
+```
+
+comparing TOP7 to TOP10 and TOP10 to TOP FULL
+
+```{r, echo=TRUE, cache=TRUE}
+
+table(PREDICTION_COURSE_TOP7, PREDICTION_COURSE_TOP10)
+table(PREDICTION_COURSE_TOP10, PREDICTION_COURSE_FULL)
+```
+
+According to what we see, we can rely on the model TOP7 as it does identical prediction as TOP10 and TOP FULL.
+
+Thus, we should take a larger training set with less features (TOP 7).
+Therefore, training on more data with less features(TOP 7) is the best solution.
+This time we will sample 25% of the training set.
+It will improve our predictor and its accuracy
+
+```{r, echo=TRUE, cache=TRUE}
+
+reduced_training_set_v2 = createDataPartition(y=train_v4$classe, p=0.25, list = FALSE)
+
+inTrain = createDataPartition(y=train_v4[reduced_training_set_v2,]$classe, p=0.75, list = FALSE)
+
+Train_v666 = train_v4[reduced_training_set_v2,][inTrain,]
+Test_v666 = train_v4[reduced_training_set_v2,][-inTrain,]
+
+model_RF_TOP7_v2 = train(classe~., data=Train_v666[,TOP7_features], method="rf", preProcess="range", trControl=control, tuneGrid = expand.grid(.mtry = c(2:6)),  n.tree=200, maxit=2000)
+
+PREDICTION_TOP7_v2 = predict(model_RF_TOP7_v2, newdata=Test_v666)
+confusionMatrix(PREDICTION_TOP7_v2,Test_v666[,"classe"])
+
+
+PREDICTION_COURSE_TOP7_v2 = predict(model_RF_TOP7_v2, newdata=test_v1)
+
+table(PREDICTION_COURSE_TOP7_v2, PREDICTION_COURSE_FULL)
+
+PREDICTION_COURSE_TOP7_v2
+```
+
+This table shows that our prediction didn't change since the moment when we used only 10% of the training set.
+However, using 25% of the training set, we have achieved 97% of accuracy on the validation set. This is a very good result!
+And the last line shows our final prediction, which has been confirmed by quiz.
+

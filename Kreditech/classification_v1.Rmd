@@ -1,0 +1,126 @@
+---
+title: "Classification Challenge by KrediTech"
+author: "Dmytro Dudenko"
+date: "30. April 2016"
+output: html_document
+---
+
+Let's see and touch a bit the training data
+
+```{r}
+
+
+
+train = read.csv(file="Training.csv", header = TRUE,  fill=TRUE, sep = ';')
+valid = read.csv(file="Validation.csv", header = TRUE, fill = TRUE, sep = ';')
+summary(train)
+str(train)
+```
+We can see NA's, let's try to get them sorted.
+Factors will just keep empty, numeric columns will try to replace with approximate values
+
+
+
+```{r, echo=FALSE}
+
+train_clean = train
+valid_clean = valid
+
+train_clean$v17 = as.numeric(train_clean$v17)
+train_clean$v19 = as.numeric(train_clean$v19)
+train_clean$v29 = as.numeric(train_clean$v29)
+train_clean$v17[is.na(train_clean$v17)] = mean(train_clean$v17,na.rm=T)
+train_clean$v18[is.na(train_clean$v18)] = mean(train_clean$v18,na.rm=T)
+train_clean$v39[is.na(train_clean$v39)] = mean(train_clean$v39,na.rm=T)
+
+summary(train_clean)
+str(train_clean)
+
+valid_clean$v17 = as.numeric(valid_clean$v17)
+valid_clean$v19 = as.numeric(valid_clean$v19)
+valid_clean$v29 = as.numeric(valid_clean$v29)
+valid_clean$v17[is.na(valid_clean$v17)] = mean(valid_clean$v17,na.rm=T)
+valid_clean$v18[is.na(valid_clean$v18)] = mean(valid_clean$v18,na.rm=T)
+valid_clean$v39[is.na(valid_clean$v39)] = mean(valid_clean$v39,na.rm=T)
+
+summary(valid_clean)
+str(valid_clean)
+
+```
+
+Now we can start trying different models for supervised learning
+
+GLM
+```{r, echo=FALSE, message = F, error = F, warning = F}
+
+train_clean_subset = subset(train_clean, select=c("v17","v29", "v19", "v12", "v39","v34"))
+valid_clean_subset = subset(valid_clean, select=c("v17","v29", "v19", "v12", "v39","v34"))
+
+
+train_clean_subset$binaryclass = ifelse(train_clean$classLabel == 'no.', '0','1')
+valid_clean_subset$binaryclass = ifelse(valid_clean$classLabel == 'no.','0','1')
+
+
+
+model_lm = step(lm(binaryclass ~ v17+v29+v19+v12+v39+v34, data = train_clean_subset), direction = "backward", trace=0)
+
+
+summary(model_lm)
+
+anova(model_lm, test="Chisq")
+
+
+
+fitted_lm = predict(model_lm,newdata=subset(valid_clean_subset,select=c(1,2,3,4,5,6)),type='response')
+
+fitted_lm <- ifelse(fitted_lm > 0.5,'1','0')
+
+
+misClasificError_lm <- mean(fitted_lm != valid_clean_subset$binaryclass)
+
+print(paste('Accuracy',1-misClasificError_lm))
+
+
+library(caret);
+library(mlbench)
+
+correlationMatrix <- cor(train_clean_subset[,1:6])
+print(correlationMatrix)
+
+control <- trainControl(method="repeatedcv", number=10, repeats=3)
+model <- train(binaryclass~., data=train_clean_subset, method="glm", preProcess="scale", trControl=control)
+
+importance <- varImp(model, scale=FALSE)
+# summarize importance
+print(importance)
+# plot importance
+plot(importance)
+
+model_lm_final = step(lm(binaryclass ~ v19+v12+v34, data = train_clean_subset), direction = "backward", trace=0)
+fitted_lm_final = predict(model_lm_final,newdata=subset(valid_clean_subset,select=c("v19","v12", "v34")),type='response')
+
+fitted_lm_final <- ifelse(fitted_lm_final > 0.5,'1','0')
+
+
+
+misClasificError_lm_final <- mean(fitted_lm_final != valid_clean_subset$binaryclass)
+
+print(paste('Accuracy',1-misClasificError_lm_final))
+
+
+#all features
+
+model_lm_full = step(lm(classLabel ~ ., data = train_clean), direction = "backward", trace=0)
+fitted_lm_full = predict(model_lm_full,newdata=valid_clean,type='response')
+
+fitted_lm_full <- ifelse(fitted_lm_full > 0.5,'1','0')
+
+
+
+misClasificError_lm_full <- mean(fitted_lm_full != valid_clean_subset$binaryclass)
+
+print(paste('Accuracy',1-misClasificError_lm_full))
+
+```
+
+In fact, only three features are important

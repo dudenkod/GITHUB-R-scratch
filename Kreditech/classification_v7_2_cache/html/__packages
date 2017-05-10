@@ -1,0 +1,14 @@
+base
+foreach
+iterators
+doParallel
+lattice
+ggplot2
+caret
+kernlab
+ISLR
+RANN
+DMwR
+MASS
+randomForest
+plyr

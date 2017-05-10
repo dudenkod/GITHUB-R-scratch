@@ -1,0 +1,474 @@
+---
+title: "Classification Challenge by KrediTech"
+author: "Dmytro Dudenko"
+date: "30. April 2016"
+output:
+  html_document: default
+  pdf_document:
+    latex_engine: xelatex
+---
+
+Let's see and touch a bit the training data
+
+
+```r
+train = read.csv(file="Training.csv", header = TRUE,  fill=TRUE, sep = ';')
+valid = read.csv(file="Validation.csv", header = TRUE, fill = TRUE, sep = ';')
+summary(train)
+```
+
+```
+##     v9            v17            v29         v20         v41      
+##  a   :1279   23,25  :  64   0      : 134   l   :  32   g   :3055  
+##  b   :2382   22,67  :  52   3e-04  : 121   u   :3055   gg  :  32  
+##  NA's:  39   19,17  :  49   0,00065:  98   y   : 549   p   : 549  
+##              20,42  :  49   0,00015:  90   NA's:  64   NA's:  64  
+##              25,17  :  49   5e-04  :  87                          
+##              (Other):3398   5e-05  :  86                          
+##              NA's   :  39   (Other):3084                          
+##       v31            v36            v19       v2       v37     
+##  c      : 787   v      :2015   0      : 268   f: 529   f:1461  
+##  q      : 612   h      : 970   1,5    : 169   t:3171   t:2239  
+##  W      : 363   bb     : 339   0,04   : 127                    
+##  cc     : 343   ff     : 154   2,5    : 115                    
+##  x      : 340   z      :  49   1      : 111                    
+##  (Other):1189   (Other): 107   0,25   :  97                    
+##  NA's   :  66   NA's   :  66   (Other):2813                    
+##       v12        v7       v27      v21           v39        
+##  Min.   : 0.00   f: 276   f:1924   g:3430   Min.   :   0.0  
+##  1st Qu.: 0.00   t:3424   t:1776   p:  81   1st Qu.:   0.0  
+##  Median : 2.00                     s: 189   Median : 120.0  
+##  Mean   : 4.16                              Mean   : 162.7  
+##  3rd Qu.: 6.00                              3rd Qu.: 280.0  
+##  Max.   :67.00                              Max.   :1160.0  
+##                                             NA's   :100     
+##       v34              v18             v35       classLabel 
+##  Min.   :     0   Min.   :       0   f   : 532   no. : 276  
+##  1st Qu.:     0   1st Qu.:       0   t   :1023   yes.:3424  
+##  Median :   113   Median : 1200000   NA's:2145              
+##  Mean   :  2247   Mean   : 1626950                          
+##  3rd Qu.:  1060   3rd Qu.: 2800000                          
+##  Max.   :100000   Max.   :11600000                          
+##                   NA's   :100
+```
+
+```r
+str(train)
+```
+
+```
+## 'data.frame':	3700 obs. of  19 variables:
+##  $ v9        : Factor w/ 2 levels "a","b": 1 2 2 1 2 1 1 2 2 2 ...
+##  $ v17       : Factor w/ 288 levels "13,75","15,17",..: 17 10 142 240 153 171 98 48 123 20 ...
+##  $ v29       : Factor w/ 179 levels "0","0,000104",..: 160 153 5 9 40 8 152 176 154 95 ...
+##  $ v20       : Factor w/ 3 levels "l","u","y": 2 3 2 2 2 3 2 3 2 2 ...
+##  $ v41       : Factor w/ 3 levels "g","gg","p": 1 3 1 1 1 3 1 3 1 1 ...
+##  $ v31       : Factor w/ 14 levels "aa","c","cc",..: 2 9 6 7 9 7 8 2 2 2 ...
+##  $ v36       : Factor w/ 9 levels "bb","dd","ff",..: 8 8 3 7 8 4 5 4 8 4 ...
+##  $ v19       : Factor w/ 118 levels "0","0,04","0,085",..: 53 8 1 9 13 13 1 7 8 27 ...
+##  $ v2        : Factor w/ 2 levels "f","t": 1 1 1 1 1 1 1 1 1 1 ...
+##  $ v37       : Factor w/ 2 levels "f","t": 2 1 2 1 1 1 1 1 1 1 ...
+##  $ v12       : int  1 0 1 0 0 0 0 0 0 0 ...
+##  $ v7        : Factor w/ 2 levels "f","t": 1 1 1 1 1 1 1 1 1 1 ...
+##  $ v27       : Factor w/ 2 levels "f","t": 2 1 1 1 2 2 2 1 1 1 ...
+##  $ v21       : Factor w/ 3 levels "g","p","s": 1 3 1 1 1 1 1 1 1 1 ...
+##  $ v39       : int  80 200 96 0 232 160 276 280 220 320 ...
+##  $ v34       : int  5 0 19 120 0 0 1 204 140 13 ...
+##  $ v18       : num  800000 2000000 960000 0 2320000 1600000 2760000 2800000 2200000 3200000 ...
+##  $ v35       : Factor w/ 2 levels "f","t": 2 NA 2 NA 1 1 NA NA NA NA ...
+##  $ classLabel: Factor w/ 2 levels "no.","yes.": 1 1 1 1 1 1 1 1 1 1 ...
+```
+We can see NA's, let's try to get them sorted.
+Factors will just keep empty, numeric columns will try to replace with approximate values
+
+
+Play with Caret
+
+```
+## [1] 3424
+```
+
+```
+## [1] 276
+```
+
+```
+## [1] 12.4058
+```
+
+```
+## Warning: ungenutzte Verbindung 4 (<-localhost:11783) geschlossen
+```
+
+```
+## Warning: ungenutzte Verbindung 3 (<-localhost:11783) geschlossen
+```
+
+```
+##   v9 v17 v29 v20 v41 v31 v36 v19 v2 v37 v12 v7 v27 v21 v39 v34 v35
+## 1  a  17 160   u   g   c   v  53  f   t   1  f   t   g  80   5   t
+## 2  b  10 153   y   p   k   v   8  f   f   0  f   f   s 200   0   f
+## 3  b 142   5   u   g  ff  ff   1  f   t   1  f   f   g  96  19   t
+## 4  a 240   9   u   g   i   o   9  f   f   0  f   f   g   0 120   f
+## 5  b 153  40   u   g   k   v  13  f   f   0  f   t   g 232   0   f
+## 8  b  48 176   y   p   c   h   7  f   f   0  f   f   g 280 204   f
+```
+
+```
+##            freqRatio percentUnique zeroVar   nzv
+## v9          1.808704    0.07207207   FALSE FALSE
+## v17         1.071429    9.65765766   FALSE FALSE
+## v29         1.155556    5.90990991   FALSE FALSE
+## v20         5.617647    0.10810811   FALSE FALSE
+## v41         5.740196    0.10810811   FALSE FALSE
+## v31         1.311404    0.50450450   FALSE FALSE
+## v36         2.123249    0.32432432   FALSE FALSE
+## v19         1.686441    4.14414414   FALSE FALSE
+## v2          5.902985    0.07207207   FALSE FALSE
+## v37         1.479893    0.07207207   FALSE FALSE
+## v12         4.270992    0.82882883   FALSE FALSE
+## v7         12.405797    0.07207207   FALSE FALSE
+## v27         1.077096    0.07207207   FALSE FALSE
+## v21        18.788321    0.10810811   FALSE FALSE
+## v39         4.598726    4.61261261   FALSE FALSE
+## v34        14.729730    5.90990991   FALSE FALSE
+## v18         4.598726    4.61261261   FALSE FALSE
+## v35         2.404908    0.07207207   FALSE FALSE
+## classLabel 12.405797    0.07207207   FALSE FALSE
+```
+
+```
+##            freqRatio percentUnique zeroVar   nzv
+## v9          2.571429           1.0   FALSE FALSE
+## v17         1.333333          81.5   FALSE FALSE
+## v29         1.000000          56.5   FALSE FALSE
+## v20         3.081633           1.0   FALSE FALSE
+## v41         3.081633           1.0   FALSE FALSE
+## v31         1.666667           6.5   FALSE FALSE
+## v36         3.263158           4.0   FALSE FALSE
+## v19         1.083333          37.0   FALSE FALSE
+## v2          1.352941           1.0   FALSE FALSE
+## v37         1.083333           1.0   FALSE FALSE
+## v12         5.473684           8.0   FALSE FALSE
+## v7          1.000000           1.0   FALSE FALSE
+## v27         1.000000           1.0   FALSE FALSE
+## v21        10.000000           1.5   FALSE FALSE
+## v39         2.750000          41.0   FALSE FALSE
+## v34        14.666667          44.0   FALSE FALSE
+## v18         2.750000          41.0   FALSE FALSE
+## v35         1.247191           1.0   FALSE FALSE
+## classLabel  1.150538           1.0   FALSE FALSE
+```
+
+```
+## [1] 3700   19
+```
+
+```
+## [1] 1463   19
+```
+
+```
+## Warning: glm.fit: fitted probabilities numerically 0 or 1 occurred
+```
+
+```
+## Confusion Matrix and Statistics
+## 
+##           Reference
+## Prediction  no. yes.
+##       no.   133   10
+##       yes.   74 2558
+##                                           
+##                Accuracy : 0.9697          
+##                  95% CI : (0.9627, 0.9758)
+##     No Information Rate : 0.9254          
+##     P-Value [Acc > NIR] : < 2.2e-16       
+##                                           
+##                   Kappa : 0.7444          
+##  Mcnemar's Test P-Value : 6.249e-12       
+##                                           
+##             Sensitivity : 0.64251         
+##             Specificity : 0.99611         
+##          Pos Pred Value : 0.93007         
+##          Neg Pred Value : 0.97188         
+##              Prevalence : 0.07459         
+##          Detection Rate : 0.04793         
+##    Detection Prevalence : 0.05153         
+##       Balanced Accuracy : 0.81931         
+##                                           
+##        'Positive' Class : no.             
+## 
+```
+
+```
+## Confusion Matrix and Statistics
+## 
+##           Reference
+## Prediction no. yes.
+##       no.   37   20
+##       yes.  32  836
+##                                           
+##                Accuracy : 0.9438          
+##                  95% CI : (0.9269, 0.9577)
+##     No Information Rate : 0.9254          
+##     P-Value [Acc > NIR] : 0.01656         
+##                                           
+##                   Kappa : 0.5574          
+##  Mcnemar's Test P-Value : 0.12715         
+##                                           
+##             Sensitivity : 0.53623         
+##             Specificity : 0.97664         
+##          Pos Pred Value : 0.64912         
+##          Neg Pred Value : 0.96313         
+##              Prevalence : 0.07459         
+##          Detection Rate : 0.04000         
+##    Detection Prevalence : 0.06162         
+##       Balanced Accuracy : 0.75643         
+##                                           
+##        'Positive' Class : no.             
+## 
+```
+
+```
+## Confusion Matrix and Statistics
+## 
+##           Reference
+## Prediction no. yes.
+##       no.   56    5
+##       yes.  51   88
+##                                          
+##                Accuracy : 0.72           
+##                  95% CI : (0.6523, 0.781)
+##     No Information Rate : 0.535          
+##     P-Value [Acc > NIR] : 6.455e-08      
+##                                          
+##                   Kappa : 0.4549         
+##  Mcnemar's Test P-Value : 1.817e-09      
+##                                          
+##             Sensitivity : 0.5234         
+##             Specificity : 0.9462         
+##          Pos Pred Value : 0.9180         
+##          Neg Pred Value : 0.6331         
+##              Prevalence : 0.5350         
+##          Detection Rate : 0.2800         
+##    Detection Prevalence : 0.3050         
+##       Balanced Accuracy : 0.7348         
+##                                          
+##        'Positive' Class : no.            
+## 
+```
+
+![plot of chunk unnamed-chunk-2](figure/unnamed-chunk-2-1.png) ![plot of chunk unnamed-chunk-2](figure/unnamed-chunk-2-2.png) ![plot of chunk unnamed-chunk-2](figure/unnamed-chunk-2-3.png) 
+
+```
+## Warning in knnImputation(MM): No case has missing values. Stopping as there
+## is nothing to do.
+```
+
+```
+##  v9            v17             v29         v20      v41      
+##  a: 988   Min.   :  1.0   Min.   :  1.00   l:  75   g :2342  
+##  b:1787   1st Qu.: 67.0   1st Qu.: 46.00   u:2292   gg:  25  
+##           Median :121.0   Median : 98.00   y: 408   p : 408  
+##           Mean   :135.4   Mean   : 94.98                     
+##           3rd Qu.:207.0   3rd Qu.:149.00                     
+##           Max.   :288.0   Max.   :179.00                     
+##                                                              
+##       v31           v36            v19         v2       v37     
+##  c      :598   v      :1516   Min.   :  1.00   f: 402   f:1119  
+##  q      :456   h      : 714   1st Qu.: 13.00   t:2373   t:1656  
+##  W      :266   bb     : 307   Median : 45.00                    
+##  cc     :261   ff     : 120   Mean   : 47.73                    
+##  x      :251   z      :  36   3rd Qu.: 78.00                    
+##  aa     :195   j      :  28   Max.   :118.00                    
+##  (Other):748   (Other):  54                                     
+##       v12         v7       v27      v21           v39        
+##  Min.   : 0.000   f: 207   f:1439   g:2574   Min.   :   0.0  
+##  1st Qu.: 0.000   t:2568   t:1336   p:  64   1st Qu.:   0.0  
+##  Median : 2.000                     s: 137   Median : 120.0  
+##  Mean   : 4.104                              Mean   : 162.2  
+##  3rd Qu.: 6.000                              3rd Qu.: 274.0  
+##  Max.   :67.000                              Max.   :1160.0  
+##                                                              
+##       v34              v18           v35      classLabel 
+##  Min.   :     0   Min.   :       0   f:1960   no. : 207  
+##  1st Qu.:     0   1st Qu.:       0   t: 815   yes.:2568  
+##  Median :   113   Median : 1200000                       
+##  Mean   :  2368   Mean   : 1621860                       
+##  3rd Qu.:  1088   3rd Qu.: 2740000                       
+##  Max.   :100000   Max.   :11600000                       
+## 
+```
+
+```
+##  v9            v17             v29         v20      v41      
+##  a: 988   Min.   :  1.0   Min.   :  1.00   l:  75   g :2342  
+##  b:1787   1st Qu.: 67.0   1st Qu.: 46.00   u:2292   gg:  25  
+##           Median :121.0   Median : 98.00   y: 408   p : 408  
+##           Mean   :135.4   Mean   : 94.98                     
+##           3rd Qu.:207.0   3rd Qu.:149.00                     
+##           Max.   :288.0   Max.   :179.00                     
+##                                                              
+##       v31           v36            v19         v2       v37     
+##  c      :598   v      :1516   Min.   :  1.00   f: 402   f:1119  
+##  q      :456   h      : 714   1st Qu.: 13.00   t:2373   t:1656  
+##  W      :266   bb     : 307   Median : 45.00                    
+##  cc     :261   ff     : 120   Mean   : 47.73                    
+##  x      :251   z      :  36   3rd Qu.: 78.00                    
+##  aa     :195   j      :  28   Max.   :118.00                    
+##  (Other):748   (Other):  54                                     
+##       v12         v7       v27      v21           v39        
+##  Min.   : 0.000   f: 207   f:1439   g:2574   Min.   :   0.0  
+##  1st Qu.: 0.000   t:2568   t:1336   p:  64   1st Qu.:   0.0  
+##  Median : 2.000                     s: 137   Median : 120.0  
+##  Mean   : 4.104                              Mean   : 162.2  
+##  3rd Qu.: 6.000                              3rd Qu.: 274.0  
+##  Max.   :67.000                              Max.   :1160.0  
+##                                                              
+##       v34              v18           v35      classLabel 
+##  Min.   :     0   Min.   :       0   f:1960   no. : 207  
+##  1st Qu.:     0   1st Qu.:       0   t: 815   yes.:2568  
+##  Median :   113   Median : 1200000                       
+##  Mean   :  2368   Mean   : 1621860                       
+##  3rd Qu.:  1088   3rd Qu.: 2740000                       
+##  Max.   :100000   Max.   :11600000                       
+## 
+```
+
+```
+## Error in cor(ww[, -19]): 'x' must be numeric
+```
+
+![plot of chunk unnamed-chunk-2](figure/unnamed-chunk-2-4.png) ![plot of chunk unnamed-chunk-2](figure/unnamed-chunk-2-5.png) 
+
+```
+## Error in summary(valid_clean): Objekt 'valid_clean' nicht gefunden
+```
+
+```
+## Error in str(valid_clean): Objekt 'valid_clean' nicht gefunden
+```
+
+
+
+```
+##  v9           v17             v29       v20      v41            v31     
+##  a:516   20,75  :  32   5e-04   :  50   l:  32   g :1216   c      :358  
+##  b:947   23,17  :  32   7,5e-05 :  50   u:1216   gg:  32   q      :234  
+##          25     :  32   0,00065 :  49   y: 215   p : 215   cc     :180  
+##          25,75  :  32   3,75e-05:  49                      x      :130  
+##          28,25  :  32   0,00055 :  48                      W      : 93  
+##          31,67  :  32   0,00025 :  38                      aa     : 89  
+##          (Other):1271   (Other) :1179                      (Other):379  
+##       v36           v19       v2       v37          v12         v7      
+##  v      :769   0      :  85   f: 178   f:488   Min.   : 0.000   f: 119  
+##  h      :386   0,04   :  67   t:1285   t:975   1st Qu.: 0.000   t:1344  
+##  bb     :169   1,5    :  54                    Median : 3.000           
+##  ff     : 84   0,125  :  40                    Mean   : 4.838           
+##  n      : 17   0,25   :  38                    3rd Qu.: 7.000           
+##  o      : 16   0,085  :  37                    Max.   :40.000           
+##  (Other): 22   (Other):1142                                             
+##  v27     v21           v39             v34              v18         
+##  f:740   g:1369   Min.   :  0.0   Min.   :     0   Min.   :      0  
+##  t:723   p:  16   1st Qu.:  0.0   1st Qu.:     0   1st Qu.:      0  
+##          s:  78   Median :140.0   Median :    68   Median :1400000  
+##                   Mean   :162.1   Mean   :  3155   Mean   :1621169  
+##                   3rd Qu.:260.0   3rd Qu.:  1260   3rd Qu.:2600000  
+##                   Max.   :840.0   Max.   :100000   Max.   :8400000  
+##                                                                     
+##  v35     classLabel 
+##  f:488   no. : 119  
+##  t:975   yes.:1344  
+##                     
+##                     
+##                     
+##                     
+## 
+```
+
+```
+## 'data.frame':	1463 obs. of  19 variables:
+##  $ v9        : Factor w/ 2 levels "a","b": 1 2 2 1 1 1 1 2 2 2 ...
+##  $ v17       : Factor w/ 288 levels "13,75","15,17",..: 17 142 153 171 83 146 20 14 102 144 ...
+##  $ v29       : Factor w/ 179 levels "0","0,000104",..: 160 5 40 8 121 155 91 91 125 128 ...
+##  $ v20       : Factor w/ 3 levels "l","u","y": 2 2 2 3 2 3 3 2 2 2 ...
+##  $ v41       : Factor w/ 3 levels "g","gg","p": 1 1 1 3 1 3 3 1 1 1 ...
+##  $ v31       : Factor w/ 14 levels "aa","c","cc",..: 2 6 9 7 11 8 11 13 7 2 ...
+##  $ v36       : Factor w/ 9 levels "bb","dd","ff",..: 8 3 8 4 4 5 4 4 1 8 ...
+##  $ v19       : Factor w/ 118 levels "0","0,04","0,085",..: 53 1 13 13 45 1 5 5 1 13 ...
+##  $ v2        : Factor w/ 2 levels "f","t": 1 1 1 1 1 1 1 1 1 2 ...
+##  $ v37       : Factor w/ 2 levels "f","t": 2 2 1 1 1 1 1 2 1 1 ...
+##  $ v12       : int  1 1 0 0 0 0 0 1 0 0 ...
+##  $ v7        : Factor w/ 2 levels "f","t": 1 1 1 1 1 1 1 1 1 1 ...
+##  $ v27       : Factor w/ 2 levels "f","t": 2 1 2 2 1 1 1 1 2 1 ...
+##  $ v21       : Factor w/ 3 levels "g","p","s": 1 1 1 1 1 1 1 1 1 1 ...
+##  $ v39       : int  80 96 232 160 280 160 340 120 178 120 ...
+##  $ v34       : int  5 19 0 0 1 20 0 1 0 0 ...
+##  $ v18       : num  800000 960000 2320000 1600000 2800000 1600000 3400000 1200000 1780000 1200000 ...
+##  $ v35       : Factor w/ 2 levels "f","t": 2 2 1 1 1 1 1 2 1 1 ...
+##  $ classLabel: Factor w/ 2 levels "no.","yes.": 1 1 1 1 1 1 1 1 1 1 ...
+```
+
+```
+##  v9          v17              v29         v20    v41         v31    
+##  a:28   Min.   :  1.00   Min.   :  1.00   u:61   g:61   q      :15  
+##  b:56   1st Qu.: 46.25   1st Qu.: 31.50   y:23   p:23   c      :14  
+##         Median : 75.50   Median : 56.50                 aa     :12  
+##         Mean   : 76.70   Mean   : 57.94                 k      :10  
+##         3rd Qu.:110.25   3rd Qu.: 89.50                 i      : 9  
+##         Max.   :160.00   Max.   :111.00                 cc     : 6  
+##                                                         (Other):18  
+##       v36          v19        v2     v37         v12         v7     v27   
+##  v      :49   Min.   : 1.00   f:34   f:44   Min.   : 0.000   f:36   f:40  
+##  h      :18   1st Qu.: 8.00   t:50   t:40   1st Qu.: 0.000   t:48   t:44  
+##  bb     : 9   Median :27.00                 Median : 0.000                
+##  ff     : 6   Mean   :29.83                 Mean   : 2.595                
+##  z      : 2   3rd Qu.:47.25                 3rd Qu.: 3.250                
+##  dd     : 0   Max.   :73.00                 Max.   :14.000                
+##  (Other): 0                                                               
+##  v21         v39             v34              v18          v35   
+##  g:80   Min.   :  0.0   Min.   :   0.0   Min.   :      0   f:44  
+##  p: 0   1st Qu.: 80.0   1st Qu.:   0.0   1st Qu.: 800000   t:40  
+##  s: 4   Median :160.0   Median :   4.5   Median :1600000         
+##         Mean   :194.4   Mean   : 479.4   Mean   :1944286         
+##         3rd Qu.:285.0   3rd Qu.: 411.2   3rd Qu.:2850000         
+##         Max.   :720.0   Max.   :6590.0   Max.   :7200000         
+##                                                                  
+##  classLabel
+##  no. :49   
+##  yes.:35   
+##            
+##            
+##            
+##            
+## 
+```
+
+```
+## 'data.frame':	84 obs. of  19 variables:
+##  $ v9        : Factor w/ 2 levels "a","b": 2 1 2 2 2 2 1 2 1 2 ...
+##  $ v17       : num  52 114 74 64 21 111 3 62 6 43 ...
+##  $ v29       : num  75 97 41 73 57 61 92 91 88 74 ...
+##  $ v20       : Factor w/ 2 levels "u","y": 2 1 1 1 1 2 1 1 1 1 ...
+##  $ v41       : Factor w/ 2 levels "g","p": 2 1 1 1 1 2 1 1 1 1 ...
+##  $ v31       : Factor w/ 13 levels "aa","c","cc",..: 1 2 10 1 1 9 6 4 1 2 ...
+##  $ v36       : Factor w/ 8 levels "bb","dd","ff",..: 7 7 7 1 7 7 3 7 7 7 ...
+##  $ v19       : num  2 50 40 7 18 4 1 17 4 4 ...
+##  $ v2        : Factor w/ 2 levels "f","t": 1 1 1 1 1 1 1 1 1 1 ...
+##  $ v37       : Factor w/ 2 levels "f","t": 1 1 2 1 1 1 2 1 1 2 ...
+##  $ v12       : int  0 0 1 0 0 0 1 0 0 2 ...
+##  $ v7        : Factor w/ 2 levels "f","t": 2 1 1 2 2 2 1 2 2 1 ...
+##  $ v27       : Factor w/ 2 levels "f","t": 2 1 2 2 1 1 1 2 1 1 ...
+##  $ v21       : Factor w/ 3 levels "g","p","s": 1 1 1 1 1 1 1 1 1 1 ...
+##  $ v39       : int  120 480 460 720 80 160 160 80 200 0 ...
+##  $ v34       : int  475 0 68 0 350 0 126 0 1 5552 ...
+##  $ v18       : num  1200000 4800000 4600000 7200000 800000 1600000 1600000 800000 2000000 0 ...
+##  $ v35       : Factor w/ 2 levels "f","t": 1 1 2 1 1 1 2 1 1 2 ...
+##  $ classLabel: Factor w/ 2 levels "no.","yes.": 1 1 1 1 1 1 1 1 1 1 ...
+```
+
+Now we can start trying different models for supervised learning
+
+
+

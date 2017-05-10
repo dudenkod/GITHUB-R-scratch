@@ -1,0 +1,270 @@
+---
+title: "Halloween"
+author: "Dmytro Dudenko"
+date: "22. November 2016"
+output: html_document
+---
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+
+library(doParallel); library(parallel)
+cores=detectCores()-1
+clust = makeCluster(cores)
+registerDoParallel(clust)
+library(caret); library(kernlab); library(ISLR); library(RANN);
+library(DMwR);library(MASS); library(randomForest); library(e1071)
+
+
+train=read.csv(file="Schreibtisch/Data_Science_ROOT/Kaggle/Ghouls_Goblins_and_Ghosts/train.csv", header = TRUE)
+test=read.csv(file="Schreibtisch/Data_Science_ROOT/Kaggle/Ghouls_Goblins_and_Ghosts/test.csv", header = TRUE)
+
+str(train)
+summary(train)
+
+train_v1 = train
+
+#Removing near zero variation. V2
+
+nearzero <- nearZeroVar(train_v1, saveMetrics = TRUE)
+#nearzero
+train_v2 <- train_v1[, !nearzero$nzv]
+
+features_corr <- findCorrelation(cor(train_v2[,-c(6,7)]), cutoff=0.2)
+features_corr
+names(train_v2[, -c(6,7)])[features_corr]
+
+table(train_v2$type)
+
+
+inTrain = createDataPartition(y=train_v2$type, p=0.8, list = FALSE)
+
+Train_v3 = train_v2[inTrain,]
+Test_v3 = train_v2[-inTrain,]
+
+
+control <- rfeControl(functions=rfFuncs, method="cv", number=10)
+# run the RFE algorithm
+results <- rfe(Train_v3[,-c(1,4,7)], Train_v3[,7], sizes=c(1:4), rfeControl=control)
+# summarize the results
+print(results)
+# list the chosen features
+predictors(results)
+
+plot(results, type=c("g", "o"))
+
+#str(Train_v5)
+
+#plotting
+
+qplot(Train_v3$bone_length,Train_v3$hair_length, col=as.logical(Train_v3$has_soul>0.5))
+
+qplot(Train_v3$bone_length,Train_v3$hair_length, col=as.logical(Train_v3$rotting_flesh>0.5))
+
+BACKUP = Train_v3 
+
+Train_v3G = subset(Train_v3, Train_v3$type == "Goblin")
+
+qplot(Train_v3G$bone_length,Train_v3G$rotting_flesh, col=Train_v3G$color)
+
+qplot(Train_v3G$bone_length,Train_v3G$hair_length, col=Train_v3G$color)
+
+qplot(Train_v3G$bone_length,Train_v3G$has_soul, col=Train_v3G$color)
+
+qplot(Train_v3G$hair_length,Train_v3G$rotting_flesh, col=Train_v3G$color)
+
+qplot(Train_v3G$has_soul,Train_v3G$rotting_flesh, col=Train_v3G$color)
+
+qplot(Train_v3G$hair_length,Train_v3G$has_soul, col=Train_v3G$color)
+
+qplot(Train_v3$hair_length,Train_v3$has_soul, col=Train_v3$type)
+
+
+
+qplot(Train_v3$mult2,Train_v3$bone_length, col=Train_v3$type)
+
+qplot(Train_v3$color,Train_v3$bone_length, col=Train_v3$type)
+qplot(Train_v3$color,Train_v3$rotting_flesh, col=Train_v3$type)
+qplot(Train_v3$color,Train_v3$hair_length, col=Train_v3$type)
+qplot(Train_v3$color,Train_v3$has_soul, col=Train_v3$type)
+
+qplot(Train_v3$type,Train_v3$bone_length, col=Train_v3$color)
+qplot(Train_v3$type,Train_v3$rotting_flesh, col=Train_v3$color)
+qplot(Train_v3$type,Train_v3$hair_length, col=Train_v3$color)
+qplot(Train_v3$type,Train_v3$has_soul, col=Train_v3$color)
+
+hist(Train_v3[Train_v3$type=="Goblin",]$has_soul,  breaks = 100)
+hist(Train_v3$rotting_flesh, col=Train_v3$type, breaks = 100)
+
+
+control <- trainControl(method="cv", number=10, repeats=5, classProbs = TRUE)
+
+Train_v3$mult = Train_v3$hair_length*Train_v3$has_soul
+Train_v3$mult2 = Train_v3$hair_length*Train_v3$has_soul/Train_v3$rotting_flesh
+Train_v3$mult3 = Train_v3$hair_length*Train_v3$has_soul*Train_v3$bone_length
+Train_v3$mult4 = Train_v3$hair_length*Train_v3$has_soul*Train_v3$bone_length/Train_v3$rotting_flesh
+Test_v3$mult = Test_v3$hair_length*Test_v3$has_soul
+Test_v3$mult2 = Test_v3$hair_length*Test_v3$has_soul/Test_v3$rotting_flesh
+Test_v3$mult3 = Test_v3$hair_length*Test_v3$has_soul*Test_v3$bone_length
+Test_v3$mult4 = Test_v3$hair_length*Test_v3$has_soul*Test_v3$bone_length/Test_v3$rotting_flesh
+
+Train_v3$mult4_2 = Train_v3$mult4*Train_v3$mult4
+Test_v3$mult4_2 = Test_v3$mult4*Test_v3$mult4
+
+Train_v3$mult4_3 = Train_v3$mult3*Train_v3$mult3
+Test_v3$mult4_3 = Test_v3$mult3*Test_v3$mult3
+
+Train_v3$mult4_33 = Train_v3$mult3*Train_v3$mult3*Train_v3$mult3
+Test_v3$mult4_33 = Test_v3$mult3*Test_v3$mult3*Test_v3$mult3
+
+Train_v3$mult4_34 = Train_v3$mult4*Train_v3$mult3*Train_v3$mult4
+Test_v3$mult4_34 = Test_v3$mult4*Test_v3$mult3*Test_v3$mult4
+
+
+Train_v3$mult4_44 = Train_v3$mult4*Train_v3$mult4*Train_v3$mult4
+Test_v3$mult4_44 = Test_v3$mult4*Test_v3$mult4*Test_v3$mult4
+
+Train_v3$mult4_3 = Train_v3$mult4_2*Train_v3$mult4_2/Train_v3$rotting_flesh
+Test_v3$mult4_3 = Test_v3$mult4_2*Test_v3$mult4_2/Test_v3$rotting_flesh
+
+Train_v3$mult4_4 = Train_v3$mult4*Train_v3$mult4/Train_v3$rotting_flesh
+Test_v3$mult4_4 = Test_v3$mult4*Test_v3$mult4/Test_v3$rotting_flesh
+
+
+Train_v3$mult3_2 = Train_v3$mult3*Train_v3$mult3
+Test_v3$mult3_2 = Test_v3$mult3*Test_v3$mult3
+
+fitControl <- trainControl(method = "repeatedcv",
+                           number = 10,
+                           repeats = 10,
+                           ## Estimate class probabilities
+                           classProbs = TRUE,
+                           ## Evaluate performance using 
+                           ## the following function
+                           summaryFunction = multiClassSummary)
+
+gbmGrid <-  expand.grid(interaction.depth = c(1, 5, 9), 
+                        n.trees = (1:30)*50, 
+                        shrinkage = 0.1,
+                        n.minobsinnode = 20)
+
+myControl <- trainControl(
+      method = "cv", 
+      number = 10,
+      repeats = 20, 
+      verboseIter = TRUE
+  )
+
+model_RF_FULL = train(type~., data=Train_v3[,-c(1,5,6)],  method="glmnet", preProcess="range", trControl=myControl, tuneGrid = expand.grid(alpha = 0:1, lambda = seq(0.0001, 1, length = 20)))
+
+Train_v3$GHOST = as.factor(as.numeric(Train_v3$type == "Ghost"))
+Train_v3$GHOUL = as.factor(as.numeric(Train_v3$type == "Ghoul"))
+Train_v3$GOBLIN = as.factor(as.numeric(Train_v3$type == "Goblin"))
+
+
+model_RF_FULL = train(type~., data=Train_v3[,-c(1,6,19,20,21)],  method="gbm", preProcess="range", trControl=fitControl,  tuneGrid=gbmGrid)
+
+model_RF_FULL
+
+gbmFit3 <- train(type ~ ., data = Train_v3[,-c(1,6,19,20,21)], 
+                 method = "gbm", 
+                 trControl = fitControl, 
+                 verbose = FALSE, 
+                 tuneGrid = gbmGrid,
+                 ## Specify which metric to optimize
+                 metric = "ROC")
+gbmFit3
+
+PREDICTION_FULL = predict(model_RF_FULL, newdata=Test_v3[,-c(1,5,6)])
+confusionMatrix(PREDICTION_FULL,Test_v3[,"type"])
+PREDICTION_FULL
+
+###GLM
+library(mlbench)
+
+correlationMatrix <- cor(Train_v3[,-c(1,6,7)])
+print(correlationMatrix)
+
+featurePlot(x=Train_v3, y=Train_v3$type, plot="pairs")
+
+features_corr <- findCorrelation(cor(Train_v3[,-c(6,7)]), cutoff=0.4)
+features_corr
+names(Train_v3[, -c(6,7)])[features_corr]
+
+Train_v4 = Train_v3[,-features_corr]
+Train_v4$color = Train_v3$color
+Train_v4$type = Train_v3$type
+
+Test_v4 = Test_v3[,-features_corr]
+Test_v4$color = Test_v3$color
+Test_v4$type = Test_v3$type
+
+str(Train_v4)
+
+#rpart attempts
+library(rpart)
+my_tree_two <- rpart(type ~., data = Train_v4, method = "class")
+
+# Visualize the decision tree using plot() and text()
+plot(my_tree_two)
+text(my_tree_two)
+
+# Load in the packages to build a fancy plot
+library(rattle)
+library(rpart.plot)
+library(RColorBrewer)
+
+fancyRpartPlot(my_tree_two)
+model_RF_FULL = train(type~., data=Train_v4[,-c(1,8)],  method="rf", preProcess="range", trControl=control, tuneGrid = expand.grid(.mtry = c(2:6)),  n.tree=200, maxit=2000)
+
+PREDICTION_FULL = predict(model_RF_FULL, newdata=Test_v4[,-c(1,8)])
+confusionMatrix(PREDICTION_FULL,Test_v4[,"type"])
+PREDICTION_FULL
+
+length(PREDICTION_FULL)
+
+test$mult = test$hair_length*test$has_soul
+test$mult2 = test$hair_length*test$has_soul/test$rotting_flesh
+test$mult3 = test$hair_length*test$has_soul*test$bone_length
+test$mult4 = test$hair_length*test$has_soul*test$bone_length/test$rotting_flesh
+
+test$mult4_2 = test$mult4*test$mult4
+
+test$mult4_3 = test$mult3*test$mult3
+
+test$mult4_33 = test$mult3*test$mult3*test$mult3
+
+test$mult4_44 = test$mult4*test$mult4*test$mult4
+
+test$mult4_3 = test$mult4_2*test$mult4_2/test$rotting_flesh
+
+test$mult4_4 = test$mult4*test$mult4/test$rotting_flesh
+
+
+test$mult3_2 = test$mult3*test$mult3
+
+PREDICTION_FULL = predict(model_RF_FULL, newdata=test[,-c(1,6)])
+test$type=PREDICTION_FULL
+str(test)
+
+answer = data.frame(id=test$id,type=test$type)
+str(answer)
+write.table(answer,file="answer.csv",sep=",", quote = FALSE, row.names = FALSE)
+
+importance <- varImp(model_RF_FULL, scale=FALSE)
+# summarize importance
+print(importance )
+plot(importance)
+
+```
+
+You can also embed plots, for example:
+
+```{r, echo=FALSE}
+plot(cars)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

@@ -1,0 +1,804 @@
+---
+title: "Classification Challenge by KrediTech"
+author: "Dmytro Dudenko"
+date: "3. Mai 2016"
+output: 
+  html_document: 
+    keep_md: yes
+---
+
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.width=5, fig.height=5,
+                      echo=FALSE, warning=FALSE, message=FALSE)
+
+```
+
+Let's see and touch a bit the training data
+
+```{r cache=TRUE}
+
+
+train = read.csv(file="Training.csv", header = TRUE,  fill=TRUE, sep = ';')
+valid = read.csv(file="Validation.csv", header = TRUE, fill = TRUE, sep = ';')
+summary(train)
+str(train)
+
+
+
+```
+Some of the features are factors (and some of them are skewed).
+Other features are numeric and intereger.
+
+Firstly, one shall load all libraries one might need during data play.
+Also, parallel run would be a good idea as training a neural network (avNNet or nnet) is simply too heavy for my laptop.
+
+```{r, echo=FALSE, cache=TRUE}
+library(doParallel); library(parallel)
+cores=detectCores()-1
+clust = makeCluster(cores)
+registerDoParallel(clust)
+library(caret); library(kernlab); library(ISLR); library(RANN);
+library(DMwR);library(MASS); library(randomForest); library(rpart)
+
+train_caret = train
+valid_caret = valid
+
+```
+These features look like numbers, let's make them so.
+
+```{r, echo=FALSE, cache=TRUE}
+train_caret$v17 = as.numeric(train_caret$v17)
+train_caret$v19 = as.numeric(train_caret$v19)
+train_caret$v29 = as.numeric(train_caret$v29)
+
+valid_caret$v17 = as.numeric(valid_caret$v17)
+valid_caret$v19 = as.numeric(valid_caret$v19)
+valid_caret$v29 = as.numeric(valid_caret$v29)
+
+#train_caret = train_caret[,!names(train_caret) %in% c("v7","v18","v35")]
+#valid_caret = valid_caret[,!names(valid_caret) %in% c("v7","v18","v35")]
+
+##train_caret = train_caret[,!names(train_caret) %in% c("v7","v18")]
+##valid_caret = valid_caret[,!names(valid_caret) %in% c("v7","v18")]
+
+```
+
+Now one should get rid of NA's. There are two ways: either call complete.cases or do imputation.
+As the dataset is not that big, I would rather prefer to keep not clean records, we may desperately need them for nnet or rf training...Therefore, calling imputation
+
+```{r, echo=FALSE, cache=TRUE}
+
+library("Amelia")
+missmap(train_caret, main="Training Data - Missings Map", 
+        col=c("yellow", "black"), legend=FALSE)
+
+missmap(valid_caret, main="Validation Data - Missings Map", 
+        col=c("yellow", "black"), legend=FALSE)
+
+str(train_caret[!is.na(train_caret$v35), !names(train_caret) %in% "classLabel"])
+class_mod <- rpart(v ~ ., data=train_caret[!is.na(train_caret$v35), !names(train_caret) %in% "classLabel"], method="class", na.action=na.omit)
+
+class_mod
+
+
+#RF Imputing
+
+train_caret_v2 = train_caret[!duplicated(train_caret),]
+valid_caret_v2 = valid_caret[!duplicated(valid_caret),]
+
+
+train_nsv = nearZeroVar(train_caret_v2, saveMetrics = TRUE)
+train_nsv
+
+correlations <- cor(train_caret_v2[sapply(train_caret_v2,is.numeric)], use="pairwise", method="spearman")
+
+
+library(corrgram)
+corrgram(train_caret_v2, order=TRUE, lower.panel=panel.shade,
+  upper.panel=panel.pie, text.panel=panel.txt,
+  main="correlation of numerical columns")
+
+train_caret_v3 = train_caret_v2[,!names(train_caret_v2) %in% c("v7","v18")]
+valid_caret_v3 = valid_caret_v2[,!names(valid_caret_v2) %in% c("v7","v18")]
+
+
+train_caret_v3_I1 = rfImpute(classLabel~., train_caret_v3)
+valid_caret_v3_I1 = rfImpute(classLabel~., valid_caret_v3)
+
+missmap(train_caret_v3_I1, main="Training Data - Missings Map", 
+        col=c("yellow", "black"), legend=FALSE)
+
+missmap(valid_caret_v3_I1, main="Validation Data - Missings Map", 
+        col=c("yellow", "black"), legend=FALSE)
+
+
+
+#Imputing with KNN
+
+
+train_caret_v3_I3= knnImputation(train_caret_v3[,!names(train_caret_v3) %in% "classLabel"], k=75)
+valid_caret_v3_I3 = knnImputation(valid_caret_v3[,!names(valid_caret_v3) %in% "classLabel"], k=25)
+train_caret_v3_I3$classLabel = train_caret_v3$classLabel
+valid_caret_v3_I3$classLabel = valid_caret_v3$classLabel
+
+
+```
+
+The training data is quite skewed, "no." is marginally present.
+
+```{r, echo=FALSE, cache=TRUE}
+
+table(train_caret_v3_I1$classLabel)
+table(valid_caret_v3_I1$classLabel)
+
+
+smote_train <- SMOTE(classLabel ~ ., data  = train_caret)
+table(smote_train$classLabel)
+
+```
+
+Here just trying to spot features with near to zero variation...None is detected.
+
+```{r, echo=FALSE, cache=TRUE}
+
+
+#valid_nsv = nearZeroVar(valid_caret, saveMetrics = TRUE)
+#valid_nsv
+
+```
+
+We need to have a first glance at all-to-all features correlations.
+On the left the plot corresponds to the training set and on the right, to the validation one.
+First outstanding things to notice are that v18 is just a multiple of v39 and therefore is redundant.
+Second interesting thing is that v7 has 100% correlation with the most important thing - classLabel.
+And it can be seen from the validation plot, this feature is poisonous and totally misguiding.
+This v7 feature should be excluded, otherwise the power of the predictor will be similar to flipping a coin (50% chance) as f and t factors are equally populated in the validation set (in feature v7).
+Just a small remark, it becomes evident below that visualising 19 features is a tough job.
+However, in this report I plotted these matrices just for the purpose of first feeling.
+After this, one can plot specific regions for thorough understanding.
+Anyway, excluding feature by feature, the plots will be seen better.
+
+```{r, echo=FALSE, cache=TRUE}
+
+```{r fig.width=4, fig.height=4,echo=FALSE,out.extra='style="float:left"',cache=TRUE}
+featurePlot(x=train_caret_v3_I1, y=train_caret_v3_I1$classLabel, plot="pairs")
+```{r fig.width=4, fig.height=4,echo=FALSE,out.extra='style="float:center"',cache=TRUE}
+featurePlot(x=valid_caret, y=valid_caret$classLabel, plot="pairs")
+```
+
+Now I present my random forest classifier. Currently it has 90% accuracy.
+I played also with other methods, namely, svm, knn, glm, and nnet as well as its avNNet version.
+All of them result in somewhat lower accuracy, which is varying between 80-90%.
+Not bad after all.
+A small remark: creating new features (logarithmic or polynomial) didn't help to achieve better accuracy.
+Sadly.
+
+```{r, echo=FALSE, cache=TRUE}
+
+
+#Downsampling
+train_caret_v3 = downSample(train_caret_v2[,!names(train_caret_v2) %in% "classLabel"], train_caret_v2$classLabel, yname = "classLabel")
+
+
+#FIRST ML ATTEMPTS. COMPARE I1 I2 I3 imputed sets
+
+set.seed(666)
+
+control <- trainControl(method="cv", number=10, repeats=5, classProbs = TRUE)
+
+model_RF = train(classLabel~., data=train_caret_v3_I3, method="rf", preProcess="range", trControl=control, tuneGrid = expand.grid(.mtry = 4),  n.tree=188, maxit=2000, importance=TRUE, proximity=TRUE)
+
+PREDICTION = predict(model_RF, newdata=valid_caret_v3_I3)
+
+confusionMatrix(PREDICTION,valid_caret_v3_I3[,"classLabel"])
+
+#KNN is 0.9 vs RFimpute of 0.89
+
+
+
+#Outliers
+
+library("CORElearn")
+
+md <- CoreModel(classLabel ~ ., train_caret_v3_I3, model="rf", rfNoTrees=30, maxThreads=1)
+outliers <- rfOutliers(md, train_caret_v3_I3)
+plot(abs(outliers), col=train_caret_v3_I3$classLabel)
+
+subset_v3_I3 = abs(outliers) < 10
+
+
+#train_caret_v4_I3 = train_caret_v3_I3[subset_v3_I3,]
+train_caret_v4_I3 = train_caret_v3_I3
+valid_caret_v4_I3 = valid_caret_v3_I3
+
+
+#One hot encoding
+cat = sapply(train_caret_v4_I3, is.factor)
+
+sparse_matrix = SparseM::model.matrix(classLabel ~ .-1, data = train_caret_v3_I3)
+sparse_matrix_Y = train_caret_v3_I3[,"classLabel"] == "yes."
+
+sparse_matrix_V = SparseM::model.matrix(classLabel ~ .-1, data = valid_caret_v3_I3)
+sparse_matrix_V_Y = valid_caret_v3_I3[,"classLabel"] == "yes."
+
+str(sparse_matrix)
+
+TTT = as.data.frame(sparse_matrix)
+TTT$classLabel = as.numeric(train_caret_v3_I3[,"classLabel"] == "yes.")
+
+TTT_V = as.data.frame(sparse_matrix_V)
+TTT_V$classLabel = as.numeric(valid_caret_v3_I3[,"classLabel"] == "yes.")
+
+
+train_caret_v5_I3=train_caret_v4_I3
+train_caret_v5_I3$INDEX=1:nrow(train_caret_v4_I3)
+valid_caret_v5_I3=valid_caret_v4_I3
+valid_caret_v5_I3$INDEX=1:nrow(valid_caret_v4_I3)
+
+
+set.seed(666)
+model_RF = train(classLabel~., data=train_caret_v5_I3, method="rf", preProcess="range", trControl=control, tuneGrid = expand.grid(.mtry = 2:4),  n.tree=200, maxit=2000, importance=TRUE, proximity=TRUE)
+
+PREDICTION_RF = predict(model_RF, newdata=valid_caret_v5_I3, type="prob")
+confusionMatrix(PREDICTION_RF,valid_caret_v5_I3[,"classLabel"])
+
+
+
+set.seed(666)
+model_RF = train(classLabel~., data=TTT, method="rf", preProcess="range", trControl=control, tuneGrid = expand.grid(.mtry = 2:4),  n.tree=200, maxit=2000, importance=TRUE, proximity=TRUE)
+
+
+
+TTT_V$v20u = 0
+TTT_V$v41gg = 0
+TTT_V$v31r = 0
+TTT_V$v36o = 0
+PREDICTION = predict(model_RF, newdata=TTT_V)
+
+confusionMatrix(round(PREDICTION),TTT_V[,"classLabel"])
+cond = round(PREDICTION) != TTT_V[,"classLabel"]
+
+set.seed(666)
+control <- trainControl(method="cv", number=10, repeats=5, classProbs = TRUE)
+model_NN = train(classLabel~., data=TTT, method="nnet", preProcess="range", trControl=control, importance=TRUE)
+
+PREDICTION = predict(model_NN, newdata=TTT_V)
+
+confusionMatrix(round(PREDICTION),TTT_V[,"classLabel"])
+
+anova(model_NN, test="Chisq")
+
+set.seed(666)
+control <- trainControl(method="cv", number=10, repeats=5, classProbs = TRUE)
+model_NN = train(classLabel~., data=train_caret_v5_I3, method="nnet", preProcess="range", trControl=control, importance=TRUE)
+
+PREDICTION_NN = predict(model_NN, newdata=valid_caret_v5_I3, type="prob")
+PREDICTION_NN <- ifelse(PREDICTION_NN > 0.5,'yes.','no.')
+confusionMatrix(PREDICTION_NN,valid_caret_v5_I3[,"classLabel"])
+
+contrasts(train_caret_v4_I3$v20)
+
+summary(model_NN)
+
+##GLM
+
+set.seed(666)
+
+control <- trainControl(method="cv", number=10, repeats=10, classProbs = TRUE)
+
+model_glm <- glm(classLabel ~.,family=binomial(link='logit'),data=train_caret_v4_I3)
+
+model_GLM = train(classLabel~., data=train_caret_v4_I3, method="rotationForest", preProcess="range", trControl=control)
+PREDICTION_glm = predict(model_GLM, newdata=valid_caret_v4_I3)
+PREDICTION_glm = predict(model_glm, newdata=valid_caret_v4_I3, type="response")
+PREDICTION_glm <- ifelse(PREDICTION_glm > 0.5,'yes.','no.')
+confusionMatrix(PREDICTION_glm,valid_caret_v4_I3[,"classLabel"])
+
+anova(model_glm, test="Chisq")
+
+
+#XGBOOST
+set.seed(666)
+TTT_xgb = xgb.DMatrix(data = as.matrix(TTT[,!names(TTT) %in% "classLabel"]), label = TTT$classLabel)
+bstSparse <- xgboost(data = as.matrix(TTT[,!names(TTT) %in% "classLabel"]), label = TTT$classLabel, max.depth = 2, eta = 1, nthread = 2, nround = 2, objective = "binary:logistic", booster="dart")
+
+bst <- xgboost(data = sparse_matrix, label = sparse_matrix_Y,  eta = 0.1,
+ max_depth = 15, 
+ nround=25, 
+ subsample = 0.5,
+ colsample_bytree = 0.5,
+ seed = 1,
+ eval_metric = "merror",
+ objective = "multi:softprob",
+ num_class = 12,
+ nthread = 3)
+
+model <- xgb.dump(bst, with.stats = T)
+model[1:10] #This statement prints top 10 nodes of the model
+
+names <- dimnames(sparse_matrix)[[2]]
+importance_matrix <- xgb.importance(names, model = bst)
+
+# Nice graph
+xgb.plot.importance(importance_matrix[1:10,])
+
+xgb.plot.tree(model = bst)
+
+importance <- xgb.importance(feature_names = colnames(sparse_matrix), model = bst)
+head(importance)
+
+importanceRaw <- xgb.importance(feature_names = colnames(sparse_matrix), model = bst, data = sparse_matrix, label = sparse_matrix_Y)
+
+importanceClean <- importanceRaw[,`:=`(Cover=NULL, Frequence=NULL)]
+
+head(importanceClean)
+
+RRRR = predict(bst, sparse_matrix_V, type="response")
+answer = RRRR >= 0.5
+confusionMatrix(answer, sparse_matrix_V_Y)
+
+xgb.plot.importance(importance_matrix = importance)
+
+pred <- predict(bstSparse, as.matrix(TTT_V[,!names(TTT_V) %in% "classLabel"]))
+prediction <- as.numeric(pred > 0.5)
+
+confusionMatrix(prediction,TTT_V[,"classLabel"])
+
+clf <- xgb.train(params=list(  objective="reg:linear", 
+                               booster = "gbtree", 
+                               eta=0.1,
+                               max_depth=10, 
+                               subsample=0.85,
+                               colsample_bytree=0.7) ,
+                 data = xgb.DMatrix(data=data.matrix(TTT[,!names(TTT) %in% "classLabel"]),
+                                    label=data.matrix(TTT[,"classLabel"]),missing=NA), 
+                 nrounds = 75, 
+                 verbose = 1,
+                 print_every_n=5,
+                 early_stopping_rounds    = 10,
+                 maximize            = FALSE,
+                 eval_metric='rmse'
+)
+
+
+PREDICTION<-predict(clf,xgb.DMatrix(data.matrix(TTT_V[,!names(TTT_V) %in% "classLabel"]),missing=NA))
+
+confusionMatrix(round(PREDICTION),TTT_V[,"classLabel"])
+
+
+set.seed(666)
+model_GBM = train(classLabel~., data=TTT, method="gbm", trControl=control, tuneGrid=gbmGrid)
+
+PREDICTION = predict(model_GBM, newdata=TTT_V)
+
+confusionMatrix(round(PREDICTION),TTT_V[,"classLabel"])
+
+set.seed(666)
+model_RF = train(classLabel~., data=train_caret_v4_I3, method="rf", preProcess="range", trControl=control, tuneGrid = expand.grid(.mtry = best.m),  n.tree=200, maxit=2000, importance=TRUE, proximity=TRUE)
+
+PREDICTION = predict(model_RF, newdata=valid_caret_v4_I3)
+
+confusionMatrix(PREDICTION,valid_caret_v4_I3[,"classLabel"])
+
+
+# CARET ENSEMBLES
+my_control <- trainControl(
+  method="repeatedcv",
+  number=25,
+  savePredictions="final",
+  classProbs=TRUE,
+  index=createResample(train_caret_v4_I3$classLabel, 25),
+  summaryFunction=twoClassSummary
+  )
+
+library("rpart")
+library("caretEnsemble")
+model_list <- caretList(
+  classLabel~., data=train_caret_v4_I3,
+  trControl=my_control,
+  methodList=c("glmnet", "nnet","rf"),
+  tuneList=list(
+ #   rf1=caretModelSpec(method="rf", tuneGrid=data.frame(.mtry=2), preProcess="range", maxiter=1000),
+ #   rf2=caretModelSpec(method="rf", tuneGrid=data.frame(.mtry=4), preProcess="pca", maxiter=1000),
+#    nn=caretModelSpec(method="nnet", tuneLength=2, trace=FALSE, maxiter=1000)
+  )
+  )
+
+p <- as.data.frame(predict(model_list, newdata=valid_caret_v4_I3))
+head(cbind(round(p),valid_caret_v4_I3$classLabel))
+
+modelCor(resamples(model_list))
+
+greedy_ensemble <- caretEnsemble(
+  model_list, 
+  metric="ROC",
+  trControl=trainControl(
+    number=2,
+    summaryFunction=twoClassSummary,
+    classProbs=TRUE
+    ))
+
+summary(greedy_ensemble)
+
+library("caTools")
+model_preds <- lapply(model_list, predict, newdata=valid_caret_v4_I3, type="prob")
+model_preds <- lapply(model_preds, function(x) x[,"yes."])
+model_preds <- data.frame(model_preds)
+ens_preds <- predict(greedy_ensemble, newdata=valid_caret_v4_I3, type="prob")
+model_preds$ensemble <- ens_preds
+caTools::colAUC(model_preds, valid_caret_v4_I3$classLabel)
+
+#MANUAL OUTLIERS HUNTING
+
+# v20 in valid does not have value l
+train_caret_v4_I3 = train_caret_v4_I3[train_caret_v4_I3$v20 != "l",]
+levels(train_caret_v4_I3$v20) = as.factor(train_caret_v4_I3$v20)
+
+#V2 is very strangely dependant on class. removing it
+#But it is very significant. removing decreases accuracy
+#train_caret_v4_I3 = train_caret_v4_I3[,!names(train_caret_v4_I3) %in% c("v2")]
+#valid_caret_v4_I3 = valid_caret_v4_I3[,!names(valid_caret_v4_I3) %in% c("v2")]
+
+#V12 < 20
+#train_caret_v4_I3 = train_caret_v4_I3[train_caret_v4_I3$v12 <=20.0,]
+TTT = TTT[TTT$v12 <=20.0,]
+#V39 < 600
+#train_caret_v4_I3 = train_caret_v4_I3[train_caret_v4_I3$v39 <=600.0,]
+TTT = TTT[TTT$v39 <=600.0,]
+
+
+#V41 is not variating
+#train_caret_v4_I3 = train_caret_v4_I3[,!names(train_caret_v4_I3) %in% c("v41")]
+#valid_caret_v4_I3 = valid_caret_v4_I3[,!names(valid_caret_v4_I3) %in% c("v41")]
+TTT = TTT[,!names(TTT) %in% c("v41")]
+TTT_V = TTT_V[,!names(TTT_V) %in% c("v41")]
+
+#RANDOM FOREST TUNING
+
+mtry <- tuneRF(train_caret_v4_I3[!names(train_caret_v4_I3) %in% c("classLabel")],train_caret_v4_I3$classLabel, ntreeTry=200,
+stepFactor=1.5,improve=0.01, trace=TRUE, plot=TRUE)
+
+best.m <- mtry[mtry[, 2] == min(mtry[, 2]), 1]
+
+print(mtry)
+print(best.m)
+
+rf <-randomForest(classLabel~.,data=train_caret_v4_I3, mtry=best.m, importance=TRUE,ntree=200)
+
+importance(rf)
+varImpPlot(rf)
+
+imp = importance(rf)
+impvar <- rownames(imp)[order(imp[, 1], decreasing=TRUE)]
+# Plot partial dependence of each predictor
+par(mfrow = c(3, 5), mar = c(2, 2, 2, 2), pty = "s");
+for (i in seq_along(impvar))
+  {
+    partialPlot(rf, train_caret_v4_I3, names(train_caret_v4_I3)[i], xlab = names(train_caret_v4_I3)[i],
+main = NULL);
+}
+
+train_caret_v4 = train_caret_v3
+valid_caret_v4 = valid_caret_v2
+
+levels(valid_caret_v4$v9) = levels(train_caret_v4$v9)
+levels(valid_caret_v4$v20) = levels(train_caret_v4$v20)
+levels(valid_caret_v4$v41) = levels(train_caret_v4$v41)
+levels(valid_caret_v4$v31) = levels(train_caret_v4$v31)
+levels(valid_caret_v4$v36) = levels(train_caret_v4$v36)
+levels(valid_caret_v4$v2) = levels(train_caret_v4$v2)
+levels(valid_caret_v4$v37) = levels(train_caret_v4$v37)
+levels(valid_caret_v4$v27) = levels(train_caret_v4$v27)
+levels(valid_caret_v4$v21) = levels(train_caret_v4$v21)
+levels(valid_caret_v4$v35) = levels(train_caret_v4$v35)
+
+
+
+#for a nicer display try 
+#plot(md, train_caret_v2, graphType="outliers")
+#destroyModels(md) # clean up
+
+#Removing some features
+#train_caret_v3 = subset(train_caret_v2, select=-v2)
+#valid_caret_v3 = subset(valid_caret_v2, select=-v2)
+
+
+
+#RANDOM FOREST
+
+mtry <- tuneRF(train_caret_v4[!names(train_caret) %in% c("classLabel")],train_caret_v4$classLabel, ntreeTry=200,
+stepFactor=1.5,improve=0.01, trace=TRUE, plot=TRUE)
+
+best.m <- mtry[mtry[, 2] == min(mtry[, 2]), 1]
+
+print(mtry)
+print(best.m)
+
+rf <-randomForest(classLabel~.,data=train_caret_v4, mtry=best.m, importance=TRUE,ntree=200)
+
+importance(rf)
+varImpPlot(rf)
+
+imp = importance(rf)
+impvar <- rownames(imp)[order(imp[, 1], decreasing=TRUE)]
+# Plot partial dependence of each predictor
+par(mfrow = c(3, 5), mar = c(2, 2, 2, 2), pty = "s");
+for (i in seq_along(impvar))
+  {
+    partialPlot(rf, train_caret_v4, names(train_caret_v4)[i], xlab = names(train_caret_v4)[i],
+main = NULL);
+}
+
+
+control <- trainControl(method="cv", number=10, repeats=5, classProbs = TRUE)
+
+
+model_RF = train(classLabel~., data=train_caret_v4, method="rf", preProcess="range", trControl=control, tuneGrid = expand.grid(.mtry = 4),  n.tree=188, maxit=2000, importance=TRUE, metric="ROC", proximity=TRUE)
+
+model_RF_TRUE = randomForest(x = train_caret_v4[,!names(train_caret_v4) %in% c("classLabel")], y=train_caret_v4$classLabel, mtry = 4, ntree=188, importance=TRUE, metric="ROC", proximity=TRUE)
+
+PREDICTION = predict(model_RF, newdata=valid_caret_v4[!names(valid_caret_v4) %in% c("classLabel")])
+
+PREDICTION = predict(model_RF_TRUE, newdata=valid_caret_v4[!names(valid_caret_v4) %in% c("classLabel")])
+
+confusionMatrix(PREDICTION,valid_caret_v4[,"classLabel"])
+
+
+#GBM
+
+
+control <- trainControl(method="cv", number=10, repeats=5, classProbs = TRUE)
+
+gbmGrid <-  expand.grid(interaction.depth = c(1, 5, 9),
+                        n.trees = (1:30)*50,
+                        shrinkage = 0.1,
+                        n.minobsinnode = 20)
+set.seed(666)
+model_GBM = train(classLabel~., data=train_caret_v4_I3, method="gbm", trControl=control, tuneGrid=gbmGrid, metric="ROC")
+
+
+
+PREDICTION = predict(model_GBM, newdata=valid_caret_v4_I3[,!names(valid_caret_v4_I3) %in% c("classLabel")])
+
+confusionMatrix(PREDICTION,valid_caret_v4_I3[,"classLabel"])
+
+#AdaBoosting and bag
+
+library(adabag)
+set.seed(666)
+BC.adaboost <- train(classLabel~., data=train_caret_v4_I3, method="AdaBoost.M1", preProcess="range", trControl=control,  importance=TRUE)
+BC.adaboost.pred <- predict.boosting(BC.adaboost,newdata=valid_caret_v4[,!names(valid_caret_v4) %in% c("classLabel")])
+confusionMatrix(BC.adaboost.pred,valid_caret_v4[,"classLabel"])
+
+
+#SVM
+
+lpSVM <- list(type = "Classification",
+                  library = "kernlab",
+                  loop = NULL)
+
+prm <- data.frame(parameter = c("C", "sigma"),
+                  class = rep("numeric", 2),
+                  label = c("Cost", "Sigma"))
+
+lpSVM$parameters <- prm
+
+svmGrid <- function(x, y, len = NULL, search = "grid") {
+  library(kernlab)
+  ## This produces low, middle and high values for sigma 
+  ## (i.e. a vector with 3 elements). 
+  sigmas <- sigest(as.matrix(x), na.action = na.omit, scaled = TRUE)
+  ## To use grid search:
+  if(search == "grid") {
+    out <- expand.grid(sigma = mean(as.vector(sigmas[-2])),
+                       C = 2 ^((1:len) - 3))
+  } else {
+    ## For random search, define ranges for the parameters then
+    ## generate random values for them
+    rng <- extendrange(log(sigmas), f = .75)
+    out <- data.frame(sigma = exp(runif(len, min = rng[1], max = rng[2])),
+                      C = 2^runif(len, min = -5, max = 8))
+  }
+  out
+}
+
+lpSVM$grid <- svmGrid
+
+svmFit <- function(x, y, wts, param, lev, last, weights, classProbs, ...) {
+  ksvm(x = as.matrix(x), y = y,
+       kernel = rbfdot,
+       kpar = list(sigma = param$sigma),
+       C = param$C,
+       prob.model = classProbs,
+       ...)
+ }
+
+lpSVM$fit <- svmFit
+
+svmPred <- function(modelFit, newdata, preProc = NULL, submodels = NULL)
+   predict(modelFit, newdata)
+lpSVM$predict <- svmPred
+
+svmProb <- function(modelFit, newdata, preProc = NULL, submodels = NULL)
+   predict(modelFit, newdata, type="probabilities")
+lpSVM$prob <- svmProb
+
+svmSort <- function(x) x[order(x$C),]
+lpSVM$sort <- svmSort
+
+  lpSVM$levels <- function(x) lev(x)
+  
+fitControl <- trainControl(method = "repeatedcv",
+                           ## 10-fold CV...
+                           number = 10,
+                           ## repeated ten times
+                           repeats = 10)
+
+
+Laplacian <- train(classLabel ~ ., data = train_caret_v4,
+                   method = lpSVM,
+                   preProc = c("center", "scale"),
+                   tuneLength = 8,
+                   trControl = fitControl)
+
+print(Laplacian, digits = 3)
+
+
+PREDICTION = predict(Laplacian, newdata=valid_caret_v4[,!names(valid_caret_v4) %in% c("classLabel")])
+
+confusionMatrix(PREDICTION,valid_caret_v4[,"classLabel"])
+
+#TREEBAG
+
+
+model_treebag <- train(classLabel ~ ., data = train_caret_v4,
+                      method = "treebag",
+                      nbagg = 50,
+                      metric = "ROC",
+                      trControl = control)
+
+PREDICTION = predict(model_treebag, newdata=valid_caret_v4[,!names(valid_caret_v4) %in% c("classLabel")])
+
+
+confusionMatrix(PREDICTION,valid_caret_v4[,"classLabel"])
+
+
+
+
+####
+
+model_glm = train(v34~., data=train_caret_v2, method="glm", preProcess="range", trControl=control, importance=TRUE)
+
+model_glm = lm(v34~., data = train_caret_v2)
+
+model_RF = randomForest(x = train_caret[1:500,!names(train_caret) %in% c("classLabel")], y=train_caret[1:500,]$classLabel, ntree=500, importance=TRUE, metric="ROC", proximity=TRUE)
+
+outlier = outlier(x = model_RF$proximity, cls=train_caret[1:500,]$classLabel)
+plot(outlier, col=train_caret[1:500,]$classLabel)
+subsetQQQ = outlier >= 4
+
+model_RF_v2 = randomForest(x = train_caret[1:500,][!subsetQQQ,!names(train_caret) %in% c("classLabel")], y=train_caret[1:500,][!subsetQQQ,]$classLabel, ntree=200, importance=TRUE, metric="ROC", proximity=TRUE)
+
+
+outlier_v2 = outlier(x = model_RF_v2$proximity, cls=train_caret[1:500,][!subsetQQQ,]$classLabel)
+plot(outlier_v2, col=train_caret[1:500,][!subsetQQQ,]$classLabel)
+
+model_RF_v3 = randomForest(x = train_caret[!subsetQQQ,!names(train_caret) %in% c("classLabel")][1:500,], y=train_caret[!subsetQQQ,][1:500,]$classLabel, ntree=200, importance=TRUE, metric="ROC", proximity=TRUE)
+
+
+
+model_RF = train(classLabel~., data=train_caret_v4, method="rf", preProcess="range", trControl=control, tuneGrid = expand.grid(.mtry = c(2:6)),  n.tree=188, maxit=2000, importance=TRUE, metric="ROC", proximity=TRUE)
+
+model_RF_TRUE = randomForest(x = train_caret_v4[,!names(train_caret_v4) %in% c("classLabel")], y=train_caret_v4$classLabel, mtry = c(2:6), ntree=500, importance=TRUE, metric="ROC", proximity=TRUE)
+
+
+control <- trainControl(method="cv", number=10, repeats=5, classProbs = TRUE)
+
+gbmGrid <-  expand.grid(interaction.depth = c(1, 5, 9),
+                        n.trees = (1:30)*50,
+                        shrinkage = 0.1,
+                        n.minobsinnode = 20)
+
+model_GBM = train(classLabel~., data=train_caret, method="gbm", trControl=control, tuneGrid=gbmGrid, metric="ROC")
+
+model_treebag <- train(classLabel ~ ., data = train_caret_v4,
+                      method = "treebag",
+                      nbagg = 50,
+                      metric = "ROC",
+                      trControl = control)
+
+PREDICTION = predict(model_treebag, newdata=valid_caret_v4[,!names(valid_caret_v4) %in% c("classLabel")])
+
+
+confusionMatrix(PREDICTION,valid_caret_v4[,"classLabel"])
+
+
+
+library(adabag)
+BC.adaboost <- train(classLabel~., data=train_caret, method="AdaBoost.M1", preProcess="range", trControl=control,  importance=TRUE, metric="ROC")
+BC.adaboost.pred <- predict.boosting(BC.adaboost,newdata=valid_caret[,!names(valid_caret) %in% c("classLabel")])
+confusionMatrix(BC.adaboost.pred,valid_caret[,"classLabel"])
+
+PREDICTION = predict(model_RF_v2, newdata=valid_caret[,!names(valid_caret) %in% c("classLabel")])
+
+PREDICTION = predict(model_RF_TRUE, newdata=valid_caret_v4[!names(valid_caret_v4) %in% c("classLabel")])
+
+
+PREDICTION = predict(model_GBM, newdata=valid_caret[,!names(valid_caret) %in% c("classLabel")])
+
+confusionMatrix(PREDICTION,valid_caret_v4[,"classLabel"])
+
+
+
+#rpart attempts
+library(rpart)
+#my_tree_two <- rpart(classLabel ~., data = train_caret[,-c(12,17)], method = "class", control = rpart.control(minsplit = 50, cp = 0))
+my_tree_two <- rpart(classLabel ~., data = train_caret_v4_I3[,-c(9)], method = "class", control = rpart.control(minsplit = 50, cp = 0))
+
+# Visualize the decision tree using plot() and text()
+plot(my_tree_two)
+text(my_tree_two)
+
+# Load in the packages to build a fancy plot
+library(rattle)
+library(rpart.plot)
+library(RColorBrewer)
+
+fancyRpartPlot(my_tree_two)
+
+#qq=as.data.frame(predict(my_tree_two, valid_caret[,-c(12,17,19)]))
+qq=as.data.frame(predict(my_tree_two, valid_caret[,!names(valid_caret) %in% c("classLabel")]))
+colnames(qq) = c("NO","YES")
+qq
+answer = as.data.frame(qq$NO<qq$YES)
+answer_prop = ifelse(answer==FALSE, "no.", "yes.")
+colnames(answer_prop) = "classe"
+qplot(answer_prop, colour=valid_caret[,"classLabel"])
+
+confusionMatrix(answer_prop,valid_caret[,"classLabel"])
+```
+
+So, after getting roughly 90% of accuracy, one could focus on features, understand them individual and collaborative role and importance.
+
+```{r, echo=FALSE, cache=TRUE}
+
+control <- rfeControl(functions=rfFuncs, method="cv", number=10)
+# run the RFE algorithm
+results <- rfe(train_caret[,!names(train_caret) %in% c("v7","v18","classLabel")], train_caret[,"classLabel"], sizes=c(1:16), rfeControl=control)
+# summarize the results
+print(results)
+# list the chosen features
+predictors(results)
+# plot the results
+
+#plot(results, type=c("g", "o"))
+
+importance <- varImp(model_RF, scale=FALSE)
+# summarize importance
+print(importance)
+# plot importance
+#plot(importance)
+```{r fig.width=4, fig.height=4,echo=FALSE,out.extra='style="float:left"',cache=TRUE}
+plot(results, split=c(1,1,1,2))
+```{r fig.width=4, fig.height=4,echo=FALSE,out.extra='style="float:center"',cache=TRUE}
+plot(importance, split=c(1,2,1,2))
+
+index_FP = ((PREDICTION != valid_caret$classLabel) & (PREDICTION == 'yes.'))
+index_FN = ((PREDICTION != valid_caret$classLabel) & (PREDICTION == 'no.'))
+
+```
+
+Above we found most important features: v2, v31, v34, v19, v12.
+These are most relevant for our predictor. We should keep it in mind.
+Here would be interesting to have a closer look at False Positives and False Negatives of our predictor.
+For instance, it can be seen that for features v2, v34, v21, v12 some regions are very narrowed.
+ With a caution and care this observation can be exploited for creating extra features, which would differentiate better points corresponding to different classLabels.
+
+```{r fig.width=4, fig.height=4,echo=FALSE,out.extra='style="float:left"',cache=TRUE}
+featurePlot(x=valid_caret[index_FP,!names(train_caret) %in% c("v7","v18","classLabel")], y=valid_caret[index_FP,]$classLabel, plot="pairs")
+```{r fig.width=4, fig.height=4,echo=FALSE,out.extra='style="float:center"',cache=TRUE}
+featurePlot(x=valid_caret[index_FN,!names(train_caret) %in% c("v7","v18","classLabel")], y=valid_caret[index_FN,]$classLabel, plot="pairs")
+```
+
+

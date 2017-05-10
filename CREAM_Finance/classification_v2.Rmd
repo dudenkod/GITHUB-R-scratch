@@ -1,0 +1,322 @@
+---
+title: "CREAM Finance BAD/GOOD challenge"
+author: "Dmytro Dudenko"
+date: "27 Januar 2017"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+booting all libraries. Not all of them I need, though.
+
+```{r initialisation section, message=FALSE, echo=TRUE, cache=FALSE}
+
+#Not all of them I need. But I can spontaneously need them.
+#So, I keep them all together
+library(doParallel); library(parallel)
+cores=detectCores()
+clust = makeCluster(cores)
+registerDoParallel(clust)
+library(caret); library(kernlab); library(ISLR); library(RANN);library(plyr);
+library(DMwR);library(MASS); library(randomForest); library(rpart);
+library(httr);library(iptools);library(CORElearn);library(xml2)
+library(scrapeR);library(cluster);library(graphics);library(ggplot2)
+
+
+```
+
+```{r Functions, message=FALSE, echo=TRUE,  cache=TRUE}
+
+#reading the data after scraping DNS-RBL data.
+#setwd("Schreibtisch/Data_Science_ROOT/JOB-Interviews/CREAM_Finance/")
+qq = read.csv(file="train_v3_blended_v2.csv", header = TRUE, fill=TRUE, sep = ';', na.strings = c(""))
+
+#shaping a bit. From now we will work only with IPv4. Land is PL. The rest of data is minor.
+#A few countries: GB,NL...all GOOD. No point to consider them.
+qq = qq[qq$Income < 4700.0 & qq$Income > 500.0 & qq$IPv4 == 1 & qq$country == "PL",]
+
+#Trying to creat some combined features
+qq$DA = (qq$Database_negative+1.0)*qq$Age
+qq$DAA = (qq$Database_negative+1.0)*qq$Age*qq$Age
+qq$DDA = qq$Database_negative*(qq$Database_negative+1.0)*qq$Age
+qq$DDAA = qq$Database_negative*(qq$Database_negative+1.0)*qq$Age*qq$Age
+qq$DI = (qq$Database_negative+1.0)*qq$Income
+qq$AI = qq$Age*qq$Income
+qq$DAI = (qq$Database_negative+1.0)*qq$Age*qq$Income
+qq$DA_1 = (qq$Database_negative+1.0)/qq$Age
+qq$DI_1 = (qq$Database_negative+1.0)/qq$Income
+qq$AI_1 = qq$Age/qq$Income
+
+#one more feature. Number of occurence in four by me selected blacklisted.
+qq$RBL_cumulus = (qq$barracuda_response_score == "listed") + (qq$spamrats_response_score == "listed") +
+    (qq$sorbs_response_score == "listed") + (qq$apews_org_response_score == "listed")
+
+table(qq$target)
+#Our dataset is skewed and therefore needs to be balanced =>downsampled
+
+set.seed(777)
+qq_down = downSample(qq[,!names(qq) %in% "target"], qq$target, yname = "target")
+
+```
+
+```{r , echo=FALSE,  cache=TRUE}
+qplot(lon, lat, data = qq, size = I(3), alpha = I(0.3), col=qq$target)
+```
+
+
+As it can be seen, there is no distinct geo feature in BAD/GOOD data.
+GOOD and BAD customers are all smeared over the entire country with respect to polish
+density of population, mainly centered in Warsaw, Lodz, Krakow/Katowice, Wroclaw, Posnan,
+and "Trojmiasto" (Gdynia,Sopot,Gdansk).
+It is also worth of mentioning that geo-data may vary from the true customer location.
+Main ISP companies are tunneling internet traffic through their gateways,
+which are often not in the same place as corresponding customers.
+Therefore, there is no meaning to stick to lon/lat data from RIPE unless true Geoloc data (GPS,Google positioning) is available.
+So, from numeric point of view, let's focus mainly in Database_negative, Age, Income and their derivatives
+
+```{r , message=FALSE, echo=TRUE,   cache=TRUE}
+
+qq_down = dplyr::select(qq_down,Database_negative,Age,Income,DA,DAA,DDA,DDAA,DI,AI,DAI,DA_1,DI_1,AI_1,
+                    target)
+#Outliers
+set.seed(777)
+md <- CoreModel(target ~ ., qq_down, model="rf", rfNoTrees=30, maxThreads=1)
+outliers <- rfOutliers(md, qq_down)
+```
+
+```{r , echo=FALSE,  cache=TRUE}
+plot(abs(outliers), col=qq_down$target)
+```
+The dataset is very incoherent, a half of data is outlier.
+```{r , echo=FALSE,  cache=TRUE}
+
+#K-means clustering
+set.seed(777)
+kmeans<- kmeans(x=qq_down[,-c(14)], centers=4, iter.max=100)
+table(kmeans$cluster,qq_down$target)
+
+```
+The same idea.
+BAD and GOODs are equally populating all four clusters.
+The same story if one also includes the blacklisting data from RBL(although, one needs to do one-hoc encoding first)
+
+Now we will do a cheat. Removing some of the outliers.
+```{r , message=FALSE, echo=TRUE,   cache=TRUE}
+
+borderline = abs(outliers) < 10
+
+qq_down_v2 = qq_down[borderline,]
+
+set.seed(777)
+iTrain = createDataPartition(y=qq_down_v2$target, p=0.8, list = FALSE)
+
+qq_train = qq_down_v2[iTrain,]
+qq_test = qq_down_v2[-iTrain,]
+
+control <- trainControl(method="cv", number=10, repeats=5, classProbs = TRUE)
+
+set.seed(777)
+model_RF = train(target~., data=qq_train, method="rf", preProcess="range", trControl=control, tuneGrid = expand.grid(.mtry = 2:6),  n.tree=200, maxit=2000, importance=TRUE, proximity=TRUE)
+
+PREDICTION_RF = predict(model_RF, newdata=qq_test)
+
+```
+
+```{r , echo=FALSE,  cache=TRUE}
+
+confusionMatrix(PREDICTION_RF,qq_test[,"target"])
+
+```
+
+So, accuracy of 0.89 is not that bad. 
+But it is cheating...
+```{r , echo=FALSE,  cache=TRUE}
+#RANDOM FOREST
+
+importance <- varImp(model_RF, scale=TRUE)
+# summarize importance
+print(importance)
+# plot importance
+plot(importance)
+
+```
+
+Some derivatives turned out to be even more important than their parent features.
+Let's see what other methods can do with it data (averaged NN, GLM, and KNN)
+
+```{r , message=FALSE, echo=TRUE,   cache=TRUE}
+
+set.seed(777)
+model_NN = train(target~., data=qq_train, method="avNNet", preProcess="range", tuneLength=2, maxit = 2000, trControl=control, importance=TRUE)
+
+PREDICTION_NN = predict(model_NN, newdata=qq_test)
+
+```
+
+```{r , echo=FALSE,  cache=TRUE}
+
+confusionMatrix(PREDICTION_NN,qq_test[,"target"])
+
+```
+
+Accuracy 0.82. Not that bad either. Obviously, if we could cut more outliers, it would be higher.
+Although, it would be a hardcore cheating...
+
+
+```{r KNN1, message=FALSE, echo=TRUE,   cache=TRUE}
+
+knnGrid <- expand.grid(.k=c(2:50))
+
+set.seed(777)
+model_knn <- train(target ~ ., data = qq_train,
+                   method = "knn",                  preProcess = c("center", "scale"),
+                   tuneLength = 20, tuneGrid =knnGrid,
+                   trControl=control)
+
+PREDICTION_knn = predict(model_knn, newdata=qq_test)
+
+
+```
+
+```{r , echo=FALSE,  cache=TRUE}
+
+confusionMatrix(PREDICTION_knn,qq_test[,"target"])
+
+```
+Accuracy 0.87. Very good.
+
+
+Now let's have a look at the features.
+How do their correlate with each other.
+
+```{r echo=FALSE,fig.width=7, out.extra='style="float:center"',cache=TRUE}
+featurePlot(x=qq_train[,-c(14)], y=qq_train$target, plot="pairs")
+
+```
+
+So, eventhough we have done some cheating, features didn't start showing correlating patterns.
+I assume that nature of BAD/GOOD labeling is not mainly based in Age/Income, rather on specific fingerprints of IPs.
+Let's include them in our model.
+
+```{r message=FALSE, echo=TRUE,cache=TRUE}
+
+set.seed(777)
+qq_down2 = downSample(qq[,!names(qq) %in% "target"], qq$target, yname = "target")
+
+qq_down2 = dplyr::select(qq_down2,Database_negative,Age,Income,DA,DAA,DDA,DDAA,DI,AI,DAI,DA_1,DI_1,AI_1,
+                        barracuda_response_score,spamrats_response_score,sorbs_response_score,apews_org_response_score,
+                        RBL_cumulus,target)
+
+
+```
+As it was already mentioned, blacklists and not showing straight patterns.
+Their scoring should be analysed with care and weighted.
+
+So, removing outliers again
+```{r , message=FALSE, echo=TRUE,   cache=TRUE}
+
+#Outliers
+
+set.seed(777)
+md <- CoreModel(target ~ ., qq_down2, model="rf", rfNoTrees=30, maxThreads=1)
+outliers <- rfOutliers(md, qq_down2)
+```
+
+```{r , echo=FALSE,  cache=TRUE}
+plot(abs(outliers), col=qq_down2$target)
+```
+
+The very similar picture, a half of data is outlier. Meaning that the labeling is not based on our set of features.
+```{r RF2, message=FALSE, echo=TRUE,   cache=TRUE}
+
+borderline = abs(outliers) < 10
+
+qq_down2_v2 = qq_down2[borderline,]
+
+set.seed(777)
+iTrain = createDataPartition(y=qq_down2_v2$target, p=0.8, list = FALSE)
+
+qq_train2 = qq_down2_v2[iTrain,]
+qq_test2 = qq_down2_v2[-iTrain,]
+
+
+control <- trainControl(method="cv", number=10, repeats=5, classProbs = TRUE)
+
+set.seed(777)
+model_RF2 = train(target~., data=qq_train2, method="rf", preProcess="range", trControl=control, tuneGrid = expand.grid(.mtry = 2:6),  n.tree=200, maxit=2000, importance=TRUE, proximity=TRUE)
+
+PREDICTION_RF2 = predict(model_RF2, newdata=qq_test2)
+
+```
+
+```{r , echo=FALSE,  cache=TRUE}
+
+confusionMatrix(PREDICTION_RF2,qq_test2[,"target"])
+
+```
+
+So, accuracy of 0.93 is better than 0.89, which was achieved by not considering blacklists. 
+But still, it is cheating...
+```{r , echo=FALSE,  cache=TRUE}
+#RANDOM FOREST
+
+importance <- varImp(model_RF2, scale=TRUE)
+# summarize importance
+```
+
+```{r , echo=FALSE,  cache=TRUE}
+# plot importance
+plot(importance)
+```
+
+So, we see that sorbs.net did help a bit to improve our model.
+Although, the most important features are still our numerical derivatives.
+
+```{r NN2, message=FALSE, echo=TRUE,   cache=TRUE}
+
+set.seed(777)
+model_NN2 = train(target~., data=qq_train2, method="avNNet", preProcess="range", tuneLength=2, maxit = 2000, trControl=control, importance=TRUE)
+
+PREDICTION_NN2 = predict(model_NN2, newdata=qq_test2)
+
+```
+
+```{r , echo=FALSE,  cache=TRUE}
+
+confusionMatrix(PREDICTION_NN2,qq_test2[,"target"])
+
+```
+Averaged Neural Network has also improved. From 0.82 to 0.87.
+
+Let's check KNN.
+
+```{r , message=FALSE, echo=TRUE,   cache=TRUE}
+
+knnGrid <- expand.grid(.k=c(2:50))
+
+set.seed(777)
+model_knn2 <- train(target ~ ., data = qq_train2,
+                   method = "knn",                  preProcess = c("center", "scale"),
+                   tuneLength = 20, tuneGrid =knnGrid,
+                   trControl=control)
+
+PREDICTION_knn2 = predict(model_knn2, newdata=qq_test2)
+
+
+```
+
+```{r , echo=FALSE,  cache=TRUE}
+
+confusionMatrix(PREDICTION_knn2,qq_test2[,"target"])
+
+```
+
+Great, KNN did a bit of drop from 0.87 to 0.81.
+Hence, we should work towards tuning our blacklist and cumulated scoring based on those lists.
+

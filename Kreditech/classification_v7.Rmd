@@ -1,0 +1,379 @@
+---
+title: "Classification Challenge by KrediTech"
+author: "Dmytro Dudenko"
+date: "30. April 2016"
+output:
+  html_document: default
+  pdf_document:
+    latex_engine: xelatex
+---
+
+Let's see and touch a bit the training data
+
+```{r}
+
+
+train = read.csv(file="Training.csv", header = TRUE,  fill=TRUE, sep = ';')
+valid = read.csv(file="Validation.csv", header = TRUE, fill = TRUE, sep = ';')
+summary(train)
+str(train)
+```
+We can see NA's, let's try to get them sorted.
+Factors will just keep empty, numeric columns will try to replace with approximate values
+
+
+Play with Caret
+```{r, echo=FALSE}
+library(doParallel); library(parallel)
+cores=detectCores()
+clust = makeCluster(cores)
+registerDoParallel(clust)
+library(caret); library(kernlab); library(ISLR); library(RANN); library(DMwR);library(MASS)
+
+train_caret = train
+valid_caret = valid
+
+sum(train_caret$classLabel == 'yes.')
+sum(train_caret$classLabel == 'no.')
+sum(train_caret$classLabel == 'yes.') / sum(train_caret$classLabel == 'no.')
+
+inTrain = createDataPartition(y=train_caret$classLabel, p=0.75, list = FALSE)
+
+train_caret$v17 = as.numeric(train_caret$v17)
+train_caret$v19 = as.numeric(train_caret$v19)
+train_caret$v29 = as.numeric(train_caret$v29)
+
+valid_caret$v17 = as.numeric(valid_caret$v17)
+valid_caret$v19 = as.numeric(valid_caret$v19)
+valid_caret$v29 = as.numeric(valid_caret$v29)
+
+training = train_caret[inTrain,]
+testing = train_caret[-inTrain,]
+
+training = knnImputation(training)
+testing= knnImputation(testing)
+valid_caret = knnImputation(valid_caret)
+
+head(training[,-c(17,19)])
+#modeFit = train(classLabel~., data=training, method='glm')
+
+nsv = nearZeroVar(training, saveMetrics = TRUE)
+nsv
+
+nsv = nearZeroVar(valid_caret, saveMetrics = TRUE)
+nsv
+
+dim(train_caret)
+dim(train_caret[complete.cases(train_caret),])
+
+#training=train_caret[complete.cases(train_caret),]
+
+control <- trainControl(method="cv", number=10, repeats=5)
+#control <- trainControl(method="boost", number=10, repeats=5)
+#modeFit = train(classLabel~., data=training[1:400,-c(11,16,15,7,12,17)], method='glm', preProcess=NULL)
+modeFit = train(classLabel~., data=training[,-c(14,4,5,12,17)], method='glm', preProcess=c("center", "scale"))
+#modeFit = train(classLabel~., data=training[,-c(11,16,12,17)], method='knn', trControl=control, preProcess=c("center", "scale"), tuneLength = 15)
+#modeFit = train(classLabel~., data=training[1:420,-c(14,4,5,12,17)], method='knn', trControl=control, preProcess=c("center", "scale"), tuneLength = 10)
+#modeFit = train(classLabel~., data=training[,-c(11,16,12,17)], method='nnet', preProcess="range", tuneLength = 5, trace = FALSE, maxit=200)
+#modeFit = train(classLabel~., data=training[,-c(14,4,5,12,17)], method='nnet', preProcess="range", tuneLength = 4, trace = FALSE, maxit=500)
+MM = predict(modeFit, training[,-c(14,4,5,12,17,19)])
+UU = predict(modeFit, testing[,-c(14,4,5,12,17,19)])
+
+confusionMatrix(MM,training[,19])
+confusionMatrix(UU,testing[,19])
+
+ZZ = predict(modeFit, valid_caret[,-c(14,4,5,12,17,19)])
+
+confusionMatrix(ZZ,valid_caret[,19])
+
+index_false = ((ZZ != valid_caret$classLabel) & (ZZ == 'yes.'))
+
+plot(ZZ)
+
+featurePlot(x=valid_caret[index_false,-c(7,12,17,19,16,11,15)], y=valid_caret[index_false,]$classLabel, plot="pairs")
+
+#featurePlot(x=training, y=training$classLabel, plot="pairs")
+
+qq = qplot(as.numeric(v34), as.numeric(v39), data=training, colour=classLabel)
+qq + geom_smooth(method='lm', formula = y~x)
+
+MM = training
+
+ww = knnImputation(MM)
+summary(MM)
+summary(ww)
+
+M = abs(cor(ww[,-19]))
+
+
+tt = predict(modeFit, newdata=testing)
+
+
+featurePlot(x=ww, y=ww$classLabel, plot="pairs")
+#MM$v17 = as.numeric(MM$v17)
+#MM$v12 = as.numeric(MM$v12)
+preObj = preProcess(MM[,12:18], method = "knnImpute")
+
+ww = predict(preObj,newdata=training)
+qq = qplot(as.numeric(v17), as.numeric(v12), data=MM, colour=classLabel)
+qq + geom_smooth(method='lm', formula = y~x)
+
+summary(valid_clean)
+str(valid_clean)
+
+```
+
+
+```{r, echo=FALSE}
+
+train_clean = train
+valid_clean = valid
+
+train_clean=train_clean[complete.cases(train_clean[,-19], train_clean[19]),]
+valid_clean=valid_clean[complete.cases(valid_clean[,-19], valid_clean[19]),]
+
+summary(train_clean)
+str(train_clean)
+
+train_clean$v17 = as.numeric(train_clean$v17)
+train_clean$v19 = as.numeric(train_clean$v19)
+train_clean$v29 = as.numeric(train_clean$v29)
+#train_clean$v17[is.na(train_clean$v17)] = mean(train_clean$v17,na.rm=T)
+#train_clean$v18[is.na(train_clean$v18)] = mean(train_clean$v18,na.rm=T)
+#train_clean$v39[is.na(train_clean$v39)] = mean(train_clean$v39,na.rm=T)
+
+
+valid_clean$v17 = as.numeric(valid_clean$v17)
+valid_clean$v19 = as.numeric(valid_clean$v19)
+valid_clean$v29 = as.numeric(valid_clean$v29)
+#valid_clean$v17[is.na(valid_clean$v17)] = mean(valid_clean$v17,na.rm=T)
+#valid_clean$v18[is.na(valid_clean$v18)] = mean(valid_clean$v18,na.rm=T)
+#valid_clean$v39[is.na(valid_clean$v39)] = mean(valid_clean$v39,na.rm=T)
+
+
+
+summary(valid_clean)
+str(valid_clean)
+
+```
+
+Now we can start trying different models for supervised learning
+
+
+```{r, echo=FALSE, message = F, error = F, warning = F}
+
+train_clean_subset = subset(train_clean, select=c("v17","v29", "v19", "v12", "v39","v34"))
+valid_clean_subset = subset(valid_clean, select=c("v17","v29", "v19", "v12", "v39","v34"))
+
+
+
+train_clean_subset$v12 = as.integer(train_clean_subset$v12)
+train_clean_subset$v39 = log10(train_clean_subset$v39+1)
+train_clean_subset$v34 = log10(train_clean_subset$v34+1)
+
+valid_clean_subset$v12 = as.integer(valid_clean_subset$v12)
+valid_clean_subset$v39 = log10(valid_clean_subset$v39+1)
+valid_clean_subset$v34 = log10(valid_clean_subset$v34+1)
+
+train_clean_subset$binaryclass = ifelse(train_clean$classLabel == 'no.', 0,1)
+valid_clean_subset$binaryclass = ifelse(valid_clean$classLabel == 'no.',0,1)
+#train_clean_subset$binaryclass = train_clean$classLabel
+#valid_clean_subset$binaryclass = valid_clean$classLabel
+
+train_clean_subset$v12 = as.numeric(train_clean_subset$v12)
+train_clean_subset$v39 = as.numeric(train_clean_subset$v39)
+train_clean_subset$v34 = as.numeric(train_clean_subset$v34)
+
+str(train_clean_subset)
+#model_lm = step(lm(binaryclass ~ v17+v29+v19+v12+v39+v34, data = train_clean_subset), direction = "backward", trace=0)
+model_lm = step(lm(binaryclass ~ v17+v29+v19+v12+v39+v34, data = train_clean_subset[1:500,]), direction = "backward", trace=0)
+
+summary(model_lm)
+
+
+fitted_lm = predict(model_lm,newdata=subset(valid_clean_subset,select=c(1,2,3,4,5,6)),type='response')
+
+#fitted_lm <- ifelse(fitted_lm > 0.5,'yes.','no.')
+fitted_lm <- ifelse(fitted_lm > 0.5,1,0)
+
+misClasificError_lm <- mean(fitted_lm != valid_clean_subset$binaryclass)
+
+print(paste('Accuracy',1-misClasificError_lm))
+
+###End of LM
+
+###GLM
+library(caret)
+library(mlbench)
+
+correlationMatrix <- cor(train_clean_subset)
+print(correlationMatrix)
+
+
+train_clean_subset$binaryclass = as.factor(train_clean_subset$binaryclass)
+control <- trainControl(method="repeatedcv", number=10, repeats=3)
+model_glm <- train(binaryclass~., data=train_clean_subset[1:500,], method="glm", trControl=control)
+
+importance <- varImp(model_glm, scale=FALSE)
+# summarize importance
+print(importance)
+# plot importance
+plot(importance)
+
+fitted_glm = predict(model_glm,newdata=subset(valid_clean_subset,select=c(1,2,3,4,5,6)),type='raw')
+fitted_glm = as.factor(fitted_glm)
+
+misClasificError_glm <- mean(fitted_glm != valid_clean_subset$binaryclass)
+print(paste('Accuracy',1-misClasificError_glm))
+
+model_glm_final = train(binaryclass~v19+v12+v34 , data=train_clean_subset[1:500,], method="glm", preProcess=c("center", "scale"), trControl=control)
+fitted_glm_final = predict(model_glm_final,newdata=subset(valid_clean_subset,select=c("v19","v12", "v34")),type='raw')
+
+misClasificError_glm_final <- mean(fitted_glm_final != valid_clean_subset$binaryclass)
+print(paste('Accuracy',1-misClasificError_glm_final))
+
+
+
+
+
+control <- rfeControl(functions=rfFuncs, method="cv", number=10)
+# run the RFE algorithm
+results <- rfe(train_clean_subset[1:500,-7], train_clean_subset[1:500,7], sizes=c(1:6), rfeControl=control)
+# summarize the results
+print(results)
+# list the chosen features
+predictors(results)
+# plot the results
+plot(results, type=c("g", "o"))
+
+control <- trainControl(method="repeatedcv", number=10, repeats=5)
+model_rf <- train(binaryclass~ v12 + v34 + v19 + v29 + v39, data=train_clean_subset[1:500,], method="rf", preProcess=c("center", "scale"), trControl=control)
+importance <- varImp(model_rf, scale=FALSE)
+# summarize importance
+print(importance)
+# plot importance
+plot(importance)
+
+fitted_rf = predict(model_rf,newdata=valid_clean_subset,type='raw')
+
+
+misClasificError_rf <- mean(fitted_rf != valid_clean_subset$binaryclass)
+
+print(paste('Accuracy',1-misClasificError_rf))
+
+
+#KNN
+ctrl <- trainControl(method = "repeatedcv",
+                     repeats = 5)
+
+
+model_knn <- train(binaryclass ~ v12 + v34 + v19 + v29, data = train_clean_subset[1:500,],
+             method = "knn",
+             trControl = ctrl)
+
+importance <- varImp(model_rf, scale=FALSE)
+# summarize importance
+print(importance)
+# plot importance
+plot(importance)
+
+fitted_knn = predict(model_knn,newdata=valid_clean_subset,type='raw')
+
+
+misClasificError_knn <- mean(fitted_knn != valid_clean_subset$binaryclass)
+
+print(paste('Accuracy',1-misClasificError_knn))
+
+
+####all features analysis
+train_clean_subset$v2 = train_clean$v2
+train_clean_subset$v21 = train_clean$v21
+train_clean_subset$v37 = train_clean$v37
+train_clean_subset$v7 = train_clean$v7
+train_clean_subset$v27 = train_clean$v27
+valid_clean_subset$v2 = valid_clean$v2
+valid_clean_subset$v21 = valid_clean$v21
+valid_clean_subset$v37 = valid_clean$v37
+valid_clean_subset$v7 = valid_clean$v7
+valid_clean_subset$v27 = valid_clean$v27
+train_clean_subset$binaryclass = train_clean$classLabel
+valid_clean_subset$binaryclass = valid_clean$classLabel
+
+control <- rfeControl(functions=rfFuncs, method="cv", number=10)
+# run the RFE algorithm
+results <- rfe(train_clean_subset[1:500,-12], train_clean_subset[1:500,12], sizes=c(1:11), rfeControl=control)
+# summarize the results
+print(results)
+# list the chosen features
+predictors(results)
+# plot the results
+plot(results, type=c("g", "o"))
+
+
+###KNN with most factor features
+#KNN
+ctrl <- trainControl(method = "repeatedcv",
+                     repeats = 5)
+
+
+model_knn <- train(binaryclass ~ v7, data = train_clean_subset[1:500,],
+             method = "knn",
+             trControl = ctrl)
+
+importance <- varImp(model_knn, scale=FALSE)
+# summarize importance
+print(importance)
+# plot importance
+plot(importance)
+
+fitted_knn = predict(model_knn,newdata=valid_clean_subset,type='raw')
+
+
+misClasificError_knn <- mean(fitted_knn != valid_clean_subset$binaryclass)
+
+print(paste('Accuracy',1-misClasificError_knn))
+
+##RF
+control <- trainControl(method="repeatedcv", number=10, repeats=5)
+#model_rf <- train(binaryclass~ v12 + v34 + v19 + v29 + v39 + v7, data=train_clean_subset[1:500,], method="rf",  trControl=control)
+model_rf <- train(binaryclass~ v2 + v7, data=train_clean_subset[1:500,], method="rf",  trControl=control)
+importance <- varImp(model_rf, scale=FALSE)
+# summarize importance
+print(importance)
+# plot importance
+plot(importance)
+
+fitted_rf = predict(model_rf,newdata=valid_clean_subset[1:500,],type='raw')
+
+
+misClasificError_rf <- mean(fitted_rf != valid_clean_subset$binaryclass)
+
+print(paste('Accuracy',1-misClasificError_rf))
+
+#GLM
+control <- trainControl(method="repeatedcv", number=10, repeats=3)
+model_glm_final = train(binaryclass~. , data=train_clean_subset[1:500,], method="glm", trControl=control)
+#fitted_glm_final = predict(model_glm_final,newdata=subset(valid_clean_subset,select=c("v19","v12", "v34")),type='raw')
+fitted_glm_final = predict(model_glm_final,newdata=valid_clean_subset[1:500,-12],type='raw')
+misClasificError_glm_final <- mean(fitted_glm_final != valid_clean_subset$binaryclass)
+print(paste('Accuracy',1-misClasificError_glm_final))
+
+
+library("ggvis")
+train_clean %>% ggvis(~v7, ~v21,  fill = ~classLabel) %>% layer_points()
+valid_clean %>% ggvis(~v7, ~v21, fill = ~classLabel) %>% layer_points()
+
+library(ROCR)
+p <- predict(model_glm_final, newdata=valid_clean_subset[1:500,-12], type="raw")
+pp = ifelse(p == 'yes.',1,0)
+pr <- prediction(pp, valid_clean_subset$binaryclass)
+prf <- performance(pr, measure = "tpr", x.measure = "fpr")
+plot(prf)
+
+auc <- performance(pr, measure = "auc")
+auc <- auc@y.values[[1]]
+auc
+
+v21```
+
+In fact, only three features are important
